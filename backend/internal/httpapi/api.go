@@ -13,14 +13,18 @@ import (
 
 	"github.com/alehturbal/nutrition/backend/internal/auth"
 	"github.com/alehturbal/nutrition/backend/internal/nutrition"
+	"github.com/alehturbal/nutrition/backend/internal/products"
+	"github.com/alehturbal/nutrition/backend/internal/recipes"
 	"github.com/alehturbal/nutrition/backend/internal/users"
 )
 
 // Handlers bundles the dependencies the HTTP layer needs.
 type Handlers struct {
-	Auth   *auth.Service
-	Users  *users.Store
-	Tokens *auth.Manager
+	Auth     *auth.Service
+	Users    *users.Store
+	Tokens   *auth.Manager
+	Products *products.Store
+	Recipes  *recipes.Store
 }
 
 // Router builds the chi router with all routes wired up.
@@ -42,6 +46,22 @@ func (h *Handlers) Router() http.Handler {
 			r.Post("/weights", h.addWeight)
 			r.Get("/weights", h.listWeights)
 			r.Get("/targets", h.getTargets)
+
+			r.Route("/products", func(r chi.Router) {
+				r.Post("/", h.createProduct)
+				r.Get("/", h.listProducts)
+				r.Get("/{id}", h.getProduct)
+				r.Put("/{id}", h.updateProduct)
+				r.Delete("/{id}", h.deleteProduct)
+			})
+
+			r.Route("/recipes", func(r chi.Router) {
+				r.Post("/", h.createRecipe)
+				r.Get("/", h.listRecipes)
+				r.Get("/{id}", h.getRecipe)
+				r.Put("/{id}", h.updateRecipe)
+				r.Delete("/{id}", h.deleteRecipe)
+			})
 		})
 	})
 
