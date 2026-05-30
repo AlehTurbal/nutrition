@@ -12,6 +12,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 
 	"github.com/alehturbal/nutrition/backend/internal/auth"
+	"github.com/alehturbal/nutrition/backend/internal/mealplans"
 	"github.com/alehturbal/nutrition/backend/internal/nutrition"
 	"github.com/alehturbal/nutrition/backend/internal/products"
 	"github.com/alehturbal/nutrition/backend/internal/recipes"
@@ -20,11 +21,12 @@ import (
 
 // Handlers bundles the dependencies the HTTP layer needs.
 type Handlers struct {
-	Auth     *auth.Service
-	Users    *users.Store
-	Tokens   *auth.Manager
-	Products *products.Store
-	Recipes  *recipes.Store
+	Auth      *auth.Service
+	Users     *users.Store
+	Tokens    *auth.Manager
+	Products  *products.Store
+	Recipes   *recipes.Store
+	MealPlans *mealplans.Store
 }
 
 // Router builds the chi router with all routes wired up.
@@ -61,6 +63,16 @@ func (h *Handlers) Router() http.Handler {
 				r.Get("/{id}", h.getRecipe)
 				r.Put("/{id}", h.updateRecipe)
 				r.Delete("/{id}", h.deleteRecipe)
+			})
+
+			r.Route("/meal-plans", func(r chi.Router) {
+				r.Post("/", h.createPlan)
+				r.Get("/", h.listPlans)
+				r.Get("/{id}", h.getPlan)
+				r.Delete("/{id}", h.deletePlan)
+				r.Post("/{id}/items", h.addItem)
+				r.Delete("/{id}/items/{itemID}", h.deleteItem)
+				r.Get("/{id}/shopping-list", h.shoppingList)
 			})
 		})
 	})
@@ -126,13 +138,14 @@ func (h *Handlers) getProfile(w http.ResponseWriter, r *http.Request) {
 }
 
 type profileRequest struct {
-	Sex           string  `json:"sex"`
-	HeightCm      float64 `json:"height_cm"`
-	Age           int     `json:"age"`
-	ActivityLevel string  `json:"activity_level"`
-	Goal          string  `json:"goal"`
-	ProteinPerKg  float64 `json:"protein_per_kg"`
-	FatPct        float64 `json:"fat_pct"`
+	Sex           string   `json:"sex"`
+	HeightCm      float64  `json:"height_cm"`
+	Age           int      `json:"age"`
+	ActivityLevel string   `json:"activity_level"`
+	Goal          string   `json:"goal"`
+	ProteinPerKg  float64  `json:"protein_per_kg"`
+	FatPct        float64  `json:"fat_pct"`
+	MealSlots     []string `json:"meal_slots"`
 }
 
 func (h *Handlers) putProfile(w http.ResponseWriter, r *http.Request) {
@@ -154,6 +167,7 @@ func (h *Handlers) putProfile(w http.ResponseWriter, r *http.Request) {
 		Goal:          req.Goal,
 		ProteinPerKg:  req.ProteinPerKg,
 		FatPct:        req.FatPct,
+		MealSlots:     req.MealSlots,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "could not save profile")
@@ -235,13 +249,23 @@ func (h *Handlers) getTargets(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	slots := p.MealSlots
+	if len(slots) == 0 {
+		slots = defaultMealSlots
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{
-		"weight_kg": weight.WeightKg,
-		"targets":   targets,
+		"weight_kg":  weight.WeightKg,
+		"targets":    targets,
+		"meal_slots": slots,
+		"per_meal":   nutrition.SplitEven(targets, slots),
 	})
 }
 
 // --- helpers ---
+
+// defaultMealSlots is used when a profile has not configured its own.
+var defaultMealSlots = []string{"breakfast", "lunch", "dinner"}
 
 func validateProfile(req profileRequest) (string, bool) {
 	switch nutrition.Sex(req.Sex) {
@@ -261,6 +285,11 @@ func validateProfile(req profileRequest) (string, bool) {
 	}
 	if req.HeightCm <= 0 || req.Age <= 0 {
 		return "height_cm and age must be positive", false
+	}
+	for _, slot := range req.MealSlots {
+		if !validMealTypes[slot] {
+			return "meal_slots must be from: breakfast, lunch, dinner, snack", false
+		}
 	}
 	return "", true
 }

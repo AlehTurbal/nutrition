@@ -38,6 +38,7 @@ type Profile struct {
 	Goal          string    `json:"goal"`
 	ProteinPerKg  float64   `json:"protein_per_kg"`
 	FatPct        float64   `json:"fat_pct"`
+	MealSlots     []string  `json:"meal_slots"`
 	UpdatedAt     time.Time `json:"updated_at"`
 }
 
@@ -95,10 +96,13 @@ func (s *Store) GetUserByEmail(ctx context.Context, email string) (User, error) 
 
 // UpsertProfile creates or replaces a user's body profile.
 func (s *Store) UpsertProfile(ctx context.Context, p Profile) (Profile, error) {
+	if p.MealSlots == nil {
+		p.MealSlots = []string{}
+	}
 	err := s.pool.QueryRow(ctx,
 		`INSERT INTO profiles
-		   (user_id, sex, height_cm, age, activity_level, goal, protein_per_kg, fat_pct, updated_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now())
+		   (user_id, sex, height_cm, age, activity_level, goal, protein_per_kg, fat_pct, meal_slots, updated_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now())
 		 ON CONFLICT (user_id) DO UPDATE SET
 		   sex = EXCLUDED.sex,
 		   height_cm = EXCLUDED.height_cm,
@@ -107,10 +111,11 @@ func (s *Store) UpsertProfile(ctx context.Context, p Profile) (Profile, error) {
 		   goal = EXCLUDED.goal,
 		   protein_per_kg = EXCLUDED.protein_per_kg,
 		   fat_pct = EXCLUDED.fat_pct,
+		   meal_slots = EXCLUDED.meal_slots,
 		   updated_at = now()
-		 RETURNING user_id, sex, height_cm, age, activity_level, goal, protein_per_kg, fat_pct, updated_at`,
-		p.UserID, p.Sex, p.HeightCm, p.Age, p.ActivityLevel, p.Goal, p.ProteinPerKg, p.FatPct,
-	).Scan(&p.UserID, &p.Sex, &p.HeightCm, &p.Age, &p.ActivityLevel, &p.Goal, &p.ProteinPerKg, &p.FatPct, &p.UpdatedAt)
+		 RETURNING user_id, sex, height_cm, age, activity_level, goal, protein_per_kg, fat_pct, meal_slots, updated_at`,
+		p.UserID, p.Sex, p.HeightCm, p.Age, p.ActivityLevel, p.Goal, p.ProteinPerKg, p.FatPct, p.MealSlots,
+	).Scan(&p.UserID, &p.Sex, &p.HeightCm, &p.Age, &p.ActivityLevel, &p.Goal, &p.ProteinPerKg, &p.FatPct, &p.MealSlots, &p.UpdatedAt)
 	if err != nil {
 		return Profile{}, fmt.Errorf("upsert profile: %w", err)
 	}
@@ -121,9 +126,9 @@ func (s *Store) UpsertProfile(ctx context.Context, p Profile) (Profile, error) {
 func (s *Store) GetProfile(ctx context.Context, userID int64) (Profile, error) {
 	var p Profile
 	err := s.pool.QueryRow(ctx,
-		`SELECT user_id, sex, height_cm, age, activity_level, goal, protein_per_kg, fat_pct, updated_at
+		`SELECT user_id, sex, height_cm, age, activity_level, goal, protein_per_kg, fat_pct, meal_slots, updated_at
 		 FROM profiles WHERE user_id = $1`, userID,
-	).Scan(&p.UserID, &p.Sex, &p.HeightCm, &p.Age, &p.ActivityLevel, &p.Goal, &p.ProteinPerKg, &p.FatPct, &p.UpdatedAt)
+	).Scan(&p.UserID, &p.Sex, &p.HeightCm, &p.Age, &p.ActivityLevel, &p.Goal, &p.ProteinPerKg, &p.FatPct, &p.MealSlots, &p.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Profile{}, ErrNotFound
 	}
