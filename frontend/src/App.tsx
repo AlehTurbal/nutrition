@@ -8,6 +8,7 @@ import ProductsPage from "./features/products/ProductsPage";
 import RecipesPage from "./features/recipes/RecipesPage";
 import PlanPage from "./features/plan/PlanPage";
 import ShoppingPage from "./features/shopping/ShoppingPage";
+import StorePage from "./features/store/StorePage";
 
 function useToken() {
   return useSyncExternalStore(subscribe, getToken);
@@ -26,6 +27,7 @@ export default function App() {
         <Route path="/recipes" element={<RecipesPage />} />
         <Route path="/plan" element={<PlanPage />} />
         <Route path="/shopping" element={<ShoppingPage />} />
+        <Route path="/store" element={<StorePage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </Layout>

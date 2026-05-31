@@ -8,6 +8,7 @@ const nav = [
   { to: "/recipes", label: "Рецепты" },
   { to: "/plan", label: "План питания" },
   { to: "/shopping", label: "Покупки" },
+  { to: "/store", label: "Магазин" },
 ];
 
 export default function Layout({ children }: { children: ReactNode }) {
