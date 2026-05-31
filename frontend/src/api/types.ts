@@ -163,3 +163,41 @@ export interface ShoppingList {
   totals: Macros;
   by_slot: SlotMacros[];
 }
+
+export interface StoreMatchItem {
+  needed: string;
+  matched: string;
+  found: boolean;
+}
+
+export interface SavedStoreMatch {
+  id: number;
+  user_id: number;
+  meal_plan_id: number;
+  created_at: string;
+  items: StoreMatchItem[];
+}
+
+export interface GeneratedIngredient {
+  name: string;
+  grams: number;
+}
+
+export interface GeneratedRecipe {
+  name: string;
+  servings: number;
+  instructions: string;
+  meal_types: MealSlot[];
+  ingredients: GeneratedIngredient[];
+}
+
+export interface MatchedIngredient {
+  name: string;
+  grams: number;
+  product_id: number | null;
+}
+
+export interface GenerateResponse {
+  recipe: GeneratedRecipe;
+  ingredients: MatchedIngredient[];
+}
