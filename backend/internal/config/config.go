@@ -9,10 +9,12 @@ import (
 
 // Config holds all runtime settings for the server.
 type Config struct {
-	Port        string
-	DatabaseURL string
-	JWTSecret   string
-	JWTTTL      time.Duration
+	Port            string
+	DatabaseURL     string
+	JWTSecret       string
+	JWTTTL          time.Duration
+	AnthropicAPIKey string
+	LLMModel        string
 }
 
 // Load reads configuration from the environment, applying sensible defaults for
@@ -39,6 +41,9 @@ func Load() (Config, error) {
 	if cfg.JWTSecret == "" {
 		return Config{}, fmt.Errorf("JWT_SECRET is required")
 	}
+
+	cfg.AnthropicAPIKey = os.Getenv("ANTHROPIC_API_KEY")
+	cfg.LLMModel = getenv("LLM_MODEL", "claude-opus-4-8")
 
 	return cfg, nil
 }
