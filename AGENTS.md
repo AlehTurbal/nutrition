@@ -14,7 +14,7 @@ Built in phases (see `.claude/plans/` and `docs/superpowers/specs/`):
 1. foundation (auth/JWT, profile, weight, target calc) — done
 2. products + recipes with meal-type tags — done
 3. meal slots, weekly plan grid, shopping need — done
-4. store + LLM matching, recipe generation, БЖУ pre-fill — planned
+4. store + LLM matching, recipe generation, БЖУ pre-fill — done
 5. chat assistant (right panel, Claude tool-use, propose→confirm) — planned
 6. Kubernetes manifests — planned
 
@@ -92,14 +92,20 @@ is HTTP → store → pgx; calculation logic is pure and dependency-free.
   and a `Service` for register/login.
 - `httpapi/` — chi router + handlers. `api.go` wires routes and holds the
   `Handlers` struct (one `*Store` per domain); `catalog.go` (products/recipes)
-  and `mealplans.go` are the handler groups. All domain routes sit behind the
-  JWT middleware.
+  and `mealplans.go` are the handler groups; `llmapi.go` holds the LLM
+  handlers (`POST /api/stores/match`, `GET /api/stores/matches/{planID}`,
+  `POST /api/recipes/generate`), returning 503 when no API key is set. All
+  domain routes sit behind the JWT middleware.
+- `llm/` — Anthropic client (`New(apiKey, model)`, `ErrNoAPIKey`) backing the
+  store-matching + recipe-generation handlers; `stores/` persists matches.
 - `db/` — `Connect` (pgxpool) and a **custom embedded migration runner**
   (`migrate.go` + `//go:embed migrations/*.sql`), applied in lexical order, each
   in its own transaction, tracked in `schema_migrations`. This is **not**
   golang-migrate. Add a new `NNNN_name.sql` to evolve the schema; migrations run
   automatically on server startup and at the start of each integration test.
 - `config/` — env config; `DATABASE_URL` and `JWT_SECRET` required.
+  `ANTHROPIC_API_KEY` is optional (LLM endpoints return 503 when unset);
+  `LLM_MODEL` defaults to `claude-opus-4-8`. Compose passes both through.
 
 ### Conventions that matter
 
