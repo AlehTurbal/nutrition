@@ -16,6 +16,7 @@ import (
 	"github.com/alehturbal/nutrition/backend/internal/mealplans"
 	"github.com/alehturbal/nutrition/backend/internal/products"
 	"github.com/alehturbal/nutrition/backend/internal/recipes"
+	"github.com/alehturbal/nutrition/backend/internal/stores"
 	"github.com/alehturbal/nutrition/backend/internal/users"
 )
 
@@ -36,7 +37,7 @@ func newServer(t *testing.T) *httptest.Server {
 	t.Cleanup(pool.Close)
 
 	// Clean slate so the run is deterministic.
-	if _, err := pool.Exec(ctx, `DROP TABLE IF EXISTS meal_plan_items, meal_plans, recipe_ingredients, recipes, products, weight_entries, profiles, users, schema_migrations CASCADE`); err != nil {
+	if _, err := pool.Exec(ctx, `DROP TABLE IF EXISTS store_match_items, store_matches, meal_plan_items, meal_plans, recipe_ingredients, recipes, products, weight_entries, profiles, users, schema_migrations CASCADE`); err != nil {
 		t.Fatalf("reset schema: %v", err)
 	}
 	if err := db.Migrate(ctx, pool); err != nil {
@@ -46,12 +47,15 @@ func newServer(t *testing.T) *httptest.Server {
 	store := users.NewStore(pool)
 	tokens := auth.NewManager("test-secret", time.Hour)
 	h := &httpapi.Handlers{
-		Auth:     auth.NewService(store, tokens),
-		Users:    store,
-		Tokens:   tokens,
-		Products:  products.NewStore(pool),
-		Recipes:   recipes.NewStore(pool),
-		MealPlans: mealplans.NewStore(pool),
+		Auth:         auth.NewService(store, tokens),
+		Users:        store,
+		Tokens:       tokens,
+		Products:     products.NewStore(pool),
+		Recipes:      recipes.NewStore(pool),
+		MealPlans:    mealplans.NewStore(pool),
+		StoreMatcher: stores.NewService(mockLLM{}),
+		StoreStore:   stores.NewStore(pool),
+		RecipeGen:    recipes.NewGenerator(mockLLM{}),
 	}
 	srv := httptest.NewServer(h.Router())
 	t.Cleanup(srv.Close)
