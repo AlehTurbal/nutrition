@@ -15,9 +15,11 @@ import (
 	"github.com/alehturbal/nutrition/backend/internal/config"
 	"github.com/alehturbal/nutrition/backend/internal/db"
 	"github.com/alehturbal/nutrition/backend/internal/httpapi"
+	"github.com/alehturbal/nutrition/backend/internal/llm"
 	"github.com/alehturbal/nutrition/backend/internal/mealplans"
 	"github.com/alehturbal/nutrition/backend/internal/products"
 	"github.com/alehturbal/nutrition/backend/internal/recipes"
+	"github.com/alehturbal/nutrition/backend/internal/stores"
 	"github.com/alehturbal/nutrition/backend/internal/users"
 )
 
@@ -48,13 +50,18 @@ func run() error {
 	tokens := auth.NewManager(cfg.JWTSecret, cfg.JWTTTL)
 	authSvc := auth.NewService(store, tokens)
 
+	llmClient := llm.New(cfg.AnthropicAPIKey, cfg.LLMModel)
+
 	handlers := &httpapi.Handlers{
-		Auth:      authSvc,
-		Users:     store,
-		Tokens:    tokens,
-		Products:  products.NewStore(pool),
-		Recipes:   recipes.NewStore(pool),
-		MealPlans: mealplans.NewStore(pool),
+		Auth:         authSvc,
+		Users:        store,
+		Tokens:       tokens,
+		Products:     products.NewStore(pool),
+		Recipes:      recipes.NewStore(pool),
+		MealPlans:    mealplans.NewStore(pool),
+		StoreMatcher: stores.NewService(llmClient),
+		StoreStore:   stores.NewStore(pool),
+		RecipeGen:    recipes.NewGenerator(llmClient),
 	}
 
 	srv := &http.Server{
