@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -111,7 +112,10 @@ func (c *Client) Complete(ctx context.Context, system, user string) (string, err
 		return "", fmt.Errorf("anthropic request: %w", err)
 	}
 	defer resp.Body.Close()
-	raw, _ := io.ReadAll(resp.Body)
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("read anthropic response: %w", err)
+	}
 
 	var parsed responseBody
 	if err := json.Unmarshal(raw, &parsed); err != nil {
@@ -125,11 +129,11 @@ func (c *Client) Complete(ctx context.Context, system, user string) (string, err
 		return "", fmt.Errorf("anthropic %d: %s", resp.StatusCode, msg)
 	}
 
-	var out string
+	var out strings.Builder
 	for _, b := range parsed.Content {
 		if b.Type == "text" {
-			out += b.Text
+			out.WriteString(b.Text)
 		}
 	}
-	return out, nil
+	return out.String(), nil
 }
