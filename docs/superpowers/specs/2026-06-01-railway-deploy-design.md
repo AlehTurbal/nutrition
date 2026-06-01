@@ -15,7 +15,7 @@ are in scope (an Anthropic API key will be configured).
   configurable base URL. The frontend must therefore be served from the **same
   origin** as the API. We achieve this with an nginx reverse proxy on the
   frontend service rather than CORS — the frontend code stays untouched.
-- The backend (`backend/`) is a Go chi API serving `/api/*` and `/health`,
+- The backend (`backend/`) is a Go chi API serving `/api/*` and `/healthz`,
   listening on `$PORT` (already handled by `config.Load()`, default 8080). It
   runs its own embedded DB migrations on startup.
 - Required backend env: `DATABASE_URL`, `JWT_SECRET`. Optional:
@@ -30,11 +30,11 @@ are in scope (an Anthropic API key will be configured).
                          ┌─────────────────────────────┐
    browser ──HTTPS──▶    │  frontend service (nginx)    │  ← public domain
                          │  serves Vite dist/           │
-                         │  proxies /api, /health  ─────┼──┐ (private net)
+                         │  proxies /api, /healthz  ─────┼──┐ (private net)
                          └─────────────────────────────┘  │
                          ┌─────────────────────────────┐  │
                          │  backend service (Go)        │ ◀┘ backend.railway.internal
-                         │  /api/*, /health  on $PORT   │
+                         │  /api/*, /healthz  on $PORT   │
                          └──────────────┬──────────────┘
                                         │ DATABASE_URL (private)
                          ┌──────────────▼──────────────┐
@@ -65,7 +65,7 @@ are in scope (an Anthropic API key will be configured).
     entrypoint.
 - **`frontend/nginx.conf.template`**:
   - `location / { try_files $uri /index.html; }` for SPA client-side routing.
-  - `location /api/` and `location /health` → `proxy_pass` to `$BACKEND_URL`.
+  - `location /api/` and `location /healthz` → `proxy_pass` to `$BACKEND_URL`.
   - `listen $PORT;` (Railway-injected for this service).
   - Uses a `resolver` + variable upstream so the internal backend hostname is
     resolved per-request (nginx otherwise caches DNS at startup and breaks when
@@ -89,7 +89,7 @@ are in scope (an Anthropic API key will be configured).
 |------|---------|
 | `backend/railway.json` | Pin builder to Dockerfile. |
 | `frontend/Dockerfile` | Build Vite bundle, serve via nginx. |
-| `frontend/nginx.conf.template` | SPA fallback + `/api` & `/health` proxy. |
+| `frontend/nginx.conf.template` | SPA fallback + `/api` & `/healthz` proxy. |
 | `frontend/docker-entrypoint.sh` | `envsubst` templating + launch nginx. |
 | `frontend/.dockerignore` | Exclude `node_modules`, `dist`, env files. |
 | `frontend/railway.json` | Pin builder to Dockerfile. |
@@ -115,7 +115,7 @@ Exact commands live in `docs/deploy-railway.md`.
 - **Local build sanity:** `docker build` succeeds for both
   `backend/Dockerfile` and `frontend/Dockerfile`.
 - **Post-deploy smoke test (against the public frontend domain):**
-  - `GET /health` → 200 (proves proxy → backend path works).
+  - `GET /healthz` → 200 (proves proxy → backend path works).
   - Register + login round-trip succeeds (proves DB + JWT).
   - Chat request succeeds (proves `ANTHROPIC_API_KEY` wired).
 
