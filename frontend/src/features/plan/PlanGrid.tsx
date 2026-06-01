@@ -1,12 +1,67 @@
 import { useState } from "react";
-import { useDeleteItem, useDeletePlan, usePlan } from "../../api/plans";
-import { useProfile } from "../../api/profile";
+import {
+  useDeleteItem,
+  useDeletePlan,
+  usePlan,
+  useShoppingList,
+} from "../../api/plans";
+import { useProfile, useTargets } from "../../api/profile";
 import { useRecipes } from "../../api/recipes";
-import type { PlanItem } from "../../api/types";
+import type { Macros, PlanItem } from "../../api/types";
 import { Button, Card, ErrorBox, Spinner } from "../../components/ui";
 import { dateRange, shortDate } from "../../lib/dates";
-import { slotLabel } from "../../lib/labels";
+import { fmt, slotLabel } from "../../lib/labels";
 import AddItem from "./AddItem";
+
+const ZERO_MACROS: Macros = {
+  kcal: 0,
+  protein: 0,
+  fat: 0,
+  carbs: 0,
+  complete: true,
+};
+
+// RemainingCell shows the БЖУ left for a day (daily target − planned), or just
+// the planned totals when no daily target is available (no profile/weight yet).
+function RemainingCell({
+  planned,
+  target,
+}: {
+  planned: Macros;
+  target: { calories: number; protein_g: number; fat_g: number; carbs_g: number } | null;
+}) {
+  const approx = planned.complete ? "" : "≈";
+  const rows: [string, number, boolean][] = target
+    ? [
+        ["ккал", target.calories - planned.kcal, true],
+        ["Б", target.protein_g - planned.protein, true],
+        ["Ж", target.fat_g - planned.fat, true],
+        ["У", target.carbs_g - planned.carbs, true],
+      ]
+    : [
+        ["ккал", planned.kcal, false],
+        ["Б", planned.protein, false],
+        ["Ж", planned.fat, false],
+        ["У", planned.carbs, false],
+      ];
+  return (
+    <div className="space-y-0.5 text-xs">
+      {rows.map(([label, value, signed]) => (
+        <div key={label} className="flex justify-between gap-2">
+          <span className="text-slate-400">{label}</span>
+          <span
+            className={
+              signed && value < 0 ? "text-red-500" : "text-slate-600"
+            }
+          >
+            {approx}
+            {fmt(value)}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 const DEFAULT_SLOTS = ["breakfast", "lunch", "dinner"];
 
@@ -14,6 +69,8 @@ export default function PlanGrid({ planId }: { planId: number }) {
   const plan = usePlan(planId);
   const profile = useProfile();
   const recipes = useRecipes();
+  const shopping = useShoppingList(planId);
+  const targets = useTargets();
   const delItem = useDeleteItem(planId);
   const delPlan = useDeletePlan();
   const [openCell, setOpenCell] = useState<string | null>(null);
@@ -29,6 +86,11 @@ export default function PlanGrid({ planId }: { planId: number }) {
 
   const itemsAt = (day: string, slot: string): PlanItem[] =>
     plan.data!.items.filter((i) => i.day_date === day && i.meal_slot === slot);
+
+  const plannedByDay = new Map(
+    (shopping.data?.by_day ?? []).map((d) => [d.date, d.macros]),
+  );
+  const dayTarget = targets.data?.targets ?? null;
 
   return (
     <Card
@@ -59,6 +121,9 @@ export default function PlanGrid({ planId }: { planId: number }) {
                   {slotLabel(s)}
                 </th>
               ))}
+              <th className="border-b border-l border-slate-200 p-2 text-left text-xs uppercase text-slate-400">
+                {dayTarget ? "Остаток" : "Итог за день"}
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -113,6 +178,12 @@ export default function PlanGrid({ planId }: { planId: number }) {
                     </td>
                   );
                 })}
+                <td className="border-b border-l border-slate-100 p-2 align-top">
+                  <RemainingCell
+                    planned={plannedByDay.get(day) ?? ZERO_MACROS}
+                    target={dayTarget}
+                  />
+                </td>
               </tr>
             ))}
           </tbody>

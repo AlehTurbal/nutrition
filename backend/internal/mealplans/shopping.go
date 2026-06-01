@@ -23,16 +23,24 @@ type SlotMacros struct {
 	Macros recipes.Macros `json:"macros"`
 }
 
+// DayMacros is the total БЖУ planned for one day across all meal slots.
+type DayMacros struct {
+	Date   Date           `json:"date"`
+	Macros recipes.Macros `json:"macros"`
+}
+
 // ShoppingList is the derived buy-list plus macro roll-ups for a plan.
 type ShoppingList struct {
-	Items     []ShoppingItem `json:"items"`
-	Totals    recipes.Macros `json:"totals"`
-	BySlot    []SlotMacros   `json:"by_slot"`
+	Items  []ShoppingItem `json:"items"`
+	Totals recipes.Macros `json:"totals"`
+	BySlot []SlotMacros   `json:"by_slot"`
+	ByDay  []DayMacros    `json:"by_day"`
 }
 
 // line is one ingredient occurrence scaled by the item's servings.
 type line struct {
 	slot       string
+	date       Date
 	productID  int64
 	name       string
 	grams      float64
@@ -58,7 +66,7 @@ func (s *Store) ShoppingList(ctx context.Context, userID, planID int64) (Shoppin
 	}
 
 	rows, err := s.pool.Query(ctx,
-		`SELECT mpi.meal_slot, ri.product_id, p.name,
+		`SELECT mpi.meal_slot, mpi.day_date, ri.product_id, p.name,
 		        ri.grams * mpi.servings / r.servings AS grams,
 		        p.kcal100, p.protein100, p.fat100, p.carbs100
 		 FROM meal_plan_items mpi
@@ -74,7 +82,7 @@ func (s *Store) ShoppingList(ctx context.Context, userID, planID int64) (Shoppin
 	var lines []line
 	for rows.Next() {
 		var l line
-		if err := rows.Scan(&l.slot, &l.productID, &l.name, &l.grams,
+		if err := rows.Scan(&l.slot, &l.date.Time, &l.productID, &l.name, &l.grams,
 			&l.kcal100, &l.protein100, &l.fat100, &l.carbs100); err != nil {
 			return ShoppingList{}, fmt.Errorf("scan line: %w", err)
 		}
@@ -102,6 +110,9 @@ func buildShoppingList(lines []line) ShoppingList {
 	order := []int64{}
 	slotGrams := map[string][]recipes.IngredientMacro{}
 	slotOrder := []string{}
+	dayGrams := map[string][]recipes.IngredientMacro{}
+	dayDates := map[string]Date{}
+	dayOrder := []string{}
 
 	for _, l := range lines {
 		a, ok := byProduct[l.productID]
@@ -118,13 +129,22 @@ func buildShoppingList(lines []line) ShoppingList {
 		slotGrams[l.slot] = append(slotGrams[l.slot], recipes.IngredientMacro{
 			Grams: l.grams, Kcal100: l.kcal100, Protein100: l.protein100, Fat100: l.fat100, Carbs100: l.carbs100,
 		})
+
+		day := l.date.Format("2006-01-02")
+		if _, ok := dayGrams[day]; !ok {
+			dayOrder = append(dayOrder, day)
+			dayDates[day] = l.date
+		}
+		dayGrams[day] = append(dayGrams[day], recipes.IngredientMacro{
+			Grams: l.grams, Kcal100: l.kcal100, Protein100: l.protein100, Fat100: l.fat100, Carbs100: l.carbs100,
+		})
 	}
 
 	sort.Slice(order, func(i, j int) bool {
 		return byProduct[order[i]].name < byProduct[order[j]].name
 	})
 
-	out := ShoppingList{Items: []ShoppingItem{}, BySlot: []SlotMacros{}}
+	out := ShoppingList{Items: []ShoppingItem{}, BySlot: []SlotMacros{}, ByDay: []DayMacros{}}
 	var totalLines []recipes.IngredientMacro
 	for _, id := range order {
 		a := byProduct[id]
@@ -143,6 +163,11 @@ func buildShoppingList(lines []line) ShoppingList {
 	sort.Strings(slotOrder)
 	for _, slot := range slotOrder {
 		out.BySlot = append(out.BySlot, SlotMacros{Slot: slot, Macros: recipes.ComputeMacros(slotGrams[slot])})
+	}
+
+	sort.Strings(dayOrder)
+	for _, day := range dayOrder {
+		out.ByDay = append(out.ByDay, DayMacros{Date: dayDates[day], Macros: recipes.ComputeMacros(dayGrams[day])})
 	}
 	return out
 }

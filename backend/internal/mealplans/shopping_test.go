@@ -3,17 +3,28 @@ package mealplans
 import (
 	"math"
 	"testing"
+	"time"
 )
 
 func ptr(f float64) *float64 { return &f }
 
+func mkDate(s string) Date {
+	t, err := time.Parse("2006-01-02", s)
+	if err != nil {
+		panic(err)
+	}
+	return Date{Time: t}
+}
+
 func TestBuildShoppingListAggregatesAndScales(t *testing.T) {
 	// Two breakfast occurrences of 100g chicken + one dinner of 50g rice.
+	// Chicken is split across two days, rice falls on the second day.
 	chickenKcal := ptr(165.0)
+	d1, d2 := mkDate("2026-06-02"), mkDate("2026-06-01")
 	lines := []line{
-		{slot: "breakfast", productID: 1, name: "Chicken", grams: 100, kcal100: chickenKcal, protein100: ptr(31), fat100: ptr(3.6), carbs100: ptr(0)},
-		{slot: "breakfast", productID: 1, name: "Chicken", grams: 100, kcal100: chickenKcal, protein100: ptr(31), fat100: ptr(3.6), carbs100: ptr(0)},
-		{slot: "dinner", productID: 2, name: "Rice", grams: 50, kcal100: ptr(130), protein100: ptr(2.7), fat100: ptr(0.3), carbs100: ptr(28)},
+		{slot: "breakfast", date: d1, productID: 1, name: "Chicken", grams: 100, kcal100: chickenKcal, protein100: ptr(31), fat100: ptr(3.6), carbs100: ptr(0)},
+		{slot: "breakfast", date: d2, productID: 1, name: "Chicken", grams: 100, kcal100: chickenKcal, protein100: ptr(31), fat100: ptr(3.6), carbs100: ptr(0)},
+		{slot: "dinner", date: d2, productID: 2, name: "Rice", grams: 50, kcal100: ptr(130), protein100: ptr(2.7), fat100: ptr(0.3), carbs100: ptr(28)},
 	}
 
 	sl := buildShoppingList(lines)
@@ -44,6 +55,17 @@ func TestBuildShoppingListAggregatesAndScales(t *testing.T) {
 	if sl.BySlot[1].Slot != "dinner" || !eq(sl.BySlot[1].Macros.Kcal, 65) {
 		t.Errorf("dinner slot wrong: %+v", sl.BySlot[1])
 	}
+
+	if len(sl.ByDay) != 2 {
+		t.Fatalf("expected 2 days, got %d", len(sl.ByDay))
+	}
+	// Sorted chronologically: 2026-06-01 (chicken 165 + rice 65), 2026-06-02 (chicken 165).
+	if sl.ByDay[0].Date.Format("2006-01-02") != "2026-06-01" || !eq(sl.ByDay[0].Macros.Kcal, 230) {
+		t.Errorf("day[0] wrong: %s %+v", sl.ByDay[0].Date.Format("2006-01-02"), sl.ByDay[0].Macros)
+	}
+	if sl.ByDay[1].Date.Format("2006-01-02") != "2026-06-02" || !eq(sl.ByDay[1].Macros.Kcal, 165) {
+		t.Errorf("day[1] wrong: %s %+v", sl.ByDay[1].Date.Format("2006-01-02"), sl.ByDay[1].Macros)
+	}
 }
 
 func TestBuildShoppingListMarksIncomplete(t *testing.T) {
@@ -61,7 +83,7 @@ func TestBuildShoppingListMarksIncomplete(t *testing.T) {
 
 func TestBuildShoppingListEmpty(t *testing.T) {
 	sl := buildShoppingList(nil)
-	if len(sl.Items) != 0 || len(sl.BySlot) != 0 {
+	if len(sl.Items) != 0 || len(sl.BySlot) != 0 || len(sl.ByDay) != 0 {
 		t.Errorf("expected empty list, got %+v", sl)
 	}
 	if !sl.Totals.Complete {

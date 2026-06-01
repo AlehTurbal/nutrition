@@ -66,6 +66,7 @@ export interface Product {
   protein100: number | null;
   fat100: number | null;
   carbs100: number | null;
+  glycemic_index: number | null;
   source: string;
   created_at: string;
   updated_at: string;
@@ -79,6 +80,7 @@ export interface ProductInput {
   protein100: number | null;
   fat100: number | null;
   carbs100: number | null;
+  glycemic_index: number | null;
 }
 
 export interface Macros {
@@ -158,10 +160,16 @@ export interface SlotMacros {
   macros: Macros;
 }
 
+export interface DayMacros {
+  date: string;
+  macros: Macros;
+}
+
 export interface ShoppingList {
   items: ShoppingItem[];
   totals: Macros;
   by_slot: SlotMacros[];
+  by_day: DayMacros[];
 }
 
 export interface StoreMatchItem {
