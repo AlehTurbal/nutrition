@@ -201,3 +201,32 @@ export interface GenerateResponse {
   recipe: GeneratedRecipe;
   ingredients: MatchedIngredient[];
 }
+
+// --- chat assistant ---
+
+export interface ChatThread {
+  id: number;
+  user_id: number;
+  title: string;
+  created_at: string;
+}
+
+export interface ChatMessage {
+  id: number;
+  thread_id: number;
+  role: "user" | "assistant";
+  content: string;
+  created_at: string;
+}
+
+// A previewed mutation the user confirms. payload is shaped exactly like the
+// body of POST /api/products or POST /api/recipes.
+export interface ChatProposal {
+  type: "product" | "recipe";
+  payload: ProductInput | RecipeInput;
+}
+
+export interface ChatSendResponse {
+  message: ChatMessage;
+  proposals: ChatProposal[];
+}

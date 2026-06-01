@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { NavLink } from "react-router-dom";
 import { clearToken } from "../lib/auth";
+import ChatPanel from "../features/chat/ChatPanel";
 
 const nav = [
   { to: "/", label: "Дашборд", end: true },
@@ -52,11 +53,7 @@ export default function Layout({ children }: { children: ReactNode }) {
           <div className="border-b border-slate-100 px-4 py-3 font-semibold text-slate-700">
             Ассистент
           </div>
-          <div className="flex flex-1 flex-col items-center justify-center gap-2 p-6 text-center text-sm text-slate-400">
-            <span className="text-3xl">💬</span>
-            <p>Чат-ассистент появится в Фазе 5.</p>
-            <p>Здесь можно будет создавать блюда и меню обычным языком.</p>
-          </div>
+          <ChatPanel />
         </aside>
       </div>
     </div>

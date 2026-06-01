@@ -18,7 +18,9 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/alehturbal/nutrition/backend/internal/assistant"
 	"github.com/alehturbal/nutrition/backend/internal/auth"
+	"github.com/alehturbal/nutrition/backend/internal/chat"
 	"github.com/alehturbal/nutrition/backend/internal/db"
 	"github.com/alehturbal/nutrition/backend/internal/httpapi"
 	"github.com/alehturbal/nutrition/backend/internal/llm"
@@ -84,13 +86,36 @@ func bootstrapDB(t *testing.T) *pgxpool.Pool {
 	t.Cleanup(pool.Close)
 
 	// Clean slate so the run is deterministic.
-	if _, err := pool.Exec(ctx, `DROP TABLE IF EXISTS store_match_items, store_matches, meal_plan_items, meal_plans, recipe_ingredients, recipes, products, weight_entries, profiles, users, schema_migrations CASCADE`); err != nil {
+	if _, err := pool.Exec(ctx, `DROP TABLE IF EXISTS chat_messages, chat_threads, store_match_items, store_matches, meal_plan_items, meal_plans, recipe_ingredients, recipes, products, weight_entries, profiles, users, schema_migrations CASCADE`); err != nil {
 		t.Fatalf("reset schema: %v", err)
 	}
 	if err := db.Migrate(ctx, pool); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	return pool
+}
+
+// handlersFor assembles the HTTP handlers over an existing pool, parameterized
+// by the LLM-backed dependencies (store matcher, recipe generator, assistant
+// tool caller) so tests can swap mocks or the unconfigured nil client.
+func handlersFor(pool *pgxpool.Pool, matcher httpapi.StoreMatcher, gen httpapi.RecipeGenerator, caller llm.ToolCaller) *httpapi.Handlers {
+	store := users.NewStore(pool)
+	productStore := products.NewStore(pool)
+	recipeStore := recipes.NewStore(pool)
+	tokens := auth.NewManager("test-secret", time.Hour)
+	return &httpapi.Handlers{
+		Auth:         auth.NewService(store, tokens),
+		Users:        store,
+		Tokens:       tokens,
+		Products:     productStore,
+		Recipes:      recipeStore,
+		MealPlans:    mealplans.NewStore(pool),
+		StoreMatcher: matcher,
+		StoreStore:   stores.NewStore(pool),
+		RecipeGen:    gen,
+		Chat:         chat.NewStore(pool),
+		Assistant:    assistant.New(caller, httpapi.NewStoreData(store, productStore, recipeStore)),
+	}
 }
 
 func newServer(t *testing.T) *httptest.Server {
@@ -103,19 +128,18 @@ func newServer(t *testing.T) *httptest.Server {
 func newServerWithPool(t *testing.T) (*httptest.Server, *pgxpool.Pool) {
 	t.Helper()
 	pool := bootstrapDB(t)
-	store := users.NewStore(pool)
-	tokens := auth.NewManager("test-secret", time.Hour)
-	h := &httpapi.Handlers{
-		Auth:         auth.NewService(store, tokens),
-		Users:        store,
-		Tokens:       tokens,
-		Products:     products.NewStore(pool),
-		Recipes:      recipes.NewStore(pool),
-		MealPlans:    mealplans.NewStore(pool),
-		StoreMatcher: stores.NewService(mockLLM{}),
-		StoreStore:   stores.NewStore(pool),
-		RecipeGen:    recipes.NewGenerator(mockLLM{}),
-	}
+	h := handlersFor(pool, stores.NewService(mockLLM{}), recipes.NewGenerator(mockLLM{}), endTurnLLM{})
+	srv := httptest.NewServer(h.Router())
+	t.Cleanup(srv.Close)
+	return srv, pool
+}
+
+// newServerWithAssistant wires the chat assistant to a specific tool caller so a
+// test can script the model's tool-use behavior.
+func newServerWithAssistant(t *testing.T, caller llm.ToolCaller) (*httptest.Server, *pgxpool.Pool) {
+	t.Helper()
+	pool := bootstrapDB(t)
+	h := handlersFor(pool, stores.NewService(mockLLM{}), recipes.NewGenerator(mockLLM{}), caller)
 	srv := httptest.NewServer(h.Router())
 	t.Cleanup(srv.Close)
 	return srv, pool
@@ -124,23 +148,19 @@ func newServerWithPool(t *testing.T) (*httptest.Server, *pgxpool.Pool) {
 func newServerNoLLM(t *testing.T) *httptest.Server {
 	t.Helper()
 	pool := bootstrapDB(t)
-	store := users.NewStore(pool)
-	tokens := auth.NewManager("test-secret", time.Hour)
 	var nilClient *llm.Client // unconfigured
-	h := &httpapi.Handlers{
-		Auth:         auth.NewService(store, tokens),
-		Users:        store,
-		Tokens:       tokens,
-		Products:     products.NewStore(pool),
-		Recipes:      recipes.NewStore(pool),
-		MealPlans:    mealplans.NewStore(pool),
-		StoreMatcher: stores.NewService(nilClient),
-		StoreStore:   stores.NewStore(pool),
-		RecipeGen:    recipes.NewGenerator(nilClient),
-	}
+	h := handlersFor(pool, stores.NewService(nilClient), recipes.NewGenerator(nilClient), nilClient)
 	srv := httptest.NewServer(h.Router())
 	t.Cleanup(srv.Close)
 	return srv
+}
+
+// endTurnLLM is a no-op tool caller: it always ends the turn with empty text.
+// Used by helpers whose tests do not exercise the chat assistant.
+type endTurnLLM struct{}
+
+func (endTurnLLM) CreateMessage(context.Context, string, []llm.Tool, []llm.Message) (llm.ToolResponse, error) {
+	return llm.ToolResponse{StopReason: "end_turn", Content: []llm.ContentBlock{{Type: "text", Text: ""}}}, nil
 }
 
 func doJSON(t *testing.T, method, url, token string, body any) (*http.Response, map[string]any) {

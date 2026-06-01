@@ -15,11 +15,11 @@ Built in phases (see `.claude/plans/` and `docs/superpowers/specs/`):
 2. products + recipes with meal-type tags — done
 3. meal slots, weekly plan grid, shopping need — done
 4. store + LLM matching, recipe generation, БЖУ pre-fill — done
-5. chat assistant (right panel, Claude tool-use, propose→confirm) — planned
+5. chat assistant (right panel, Claude tool-use, propose→confirm) — done
 6. Kubernetes manifests — planned
 
-The frontend already reserves a right-side chat panel placeholder and a disabled
-"fill via LLM" button for these future phases.
+The right-side panel is now a working chat assistant; a disabled "fill via LLM"
+button remains reserved for a future phase.
 
 ## Toolchain note (important)
 
@@ -96,10 +96,24 @@ is HTTP → store → pgx; calculation logic is pure and dependency-free.
   `Handlers` struct (one `*Store` per domain); `catalog.go` (products/recipes)
   and `mealplans.go` are the handler groups; `llmapi.go` holds the LLM
   handlers (`POST /api/stores/match`, `GET /api/stores/matches/{planID}`,
-  `POST /api/recipes/generate`), returning 503 when no API key is set. All
-  domain routes sit behind the JWT middleware.
-- `llm/` — Anthropic client (`New(apiKey, model)`, `ErrNoAPIKey`) backing the
-  store-matching + recipe-generation handlers; `stores/` persists matches.
+  `POST /api/recipes/generate`); `chatapi.go` holds the chat-assistant handlers
+  (`/api/chat/threads` CRUD + `/{id}/messages`) plus `StoreData`, the
+  `assistant.DataSource` adapter over the domain stores. LLM-backed handlers
+  return 503 when no API key is set. All domain routes sit behind JWT middleware.
+- `llm/` — Anthropic client (`New(apiKey, model)`, `ErrNoAPIKey`). `Complete`
+  (single-shot text) backs store-matching + recipe-generation; `CreateMessage`
+  (full message history + tool defs, returns stop_reason + content blocks)
+  backs the chat assistant, behind the `ToolCaller` interface. `stores/`
+  persists matches.
+- `assistant/` — Phase 5 chat. Runs a Claude tool-use loop over `ToolCaller`:
+  **read** tools (`list_products`/`list_recipes`/`get_targets`) execute against
+  a `DataSource`; **mutating** tools (`propose_product`/`propose_recipe`) are
+  NOT executed — `parseProposal` (pure, unit-tested) turns them into proposals
+  the user confirms in the UI, which POST to the existing CRUD endpoints. A
+  max-iteration cap guards the loop.
+- `chat/` — `chat_threads` + `chat_messages` store (multiple threads per user;
+  only the visible user/assistant dialog is persisted, not the tool exchange).
+  User scoping flows through `chat_threads.user_id`.
 - `db/` — `Connect` (pgxpool) and a **custom embedded migration runner**
   (`migrate.go` + `//go:embed migrations/*.sql`), applied in lexical order, each
   in its own transaction, tracked in `schema_migrations`. This is **not**

@@ -78,6 +78,29 @@ type responseBody struct {
 	} `json:"error"`
 }
 
+// post sends a marshaled request body to the Messages API and returns the raw
+// response bytes and HTTP status. Shared by Complete and CreateMessage.
+func (c *Client) post(ctx context.Context, body []byte) ([]byte, int, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, bytes.NewReader(body))
+	if err != nil {
+		return nil, 0, err
+	}
+	req.Header.Set("content-type", "application/json")
+	req.Header.Set("x-api-key", c.apiKey)
+	req.Header.Set("anthropic-version", apiVersion)
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, 0, fmt.Errorf("anthropic request: %w", err)
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, resp.StatusCode, fmt.Errorf("read anthropic response: %w", err)
+	}
+	return raw, resp.StatusCode, nil
+}
+
 // Complete sends one system+user turn and returns the concatenated text. The
 // system prompt is sent as a cacheable block (ephemeral prompt caching).
 func (c *Client) Complete(ctx context.Context, system, user string) (string, error) {
@@ -99,34 +122,21 @@ func (c *Client) Complete(ctx context.Context, system, user string) (string, err
 		return "", err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, bytes.NewReader(body))
+	raw, status, err := c.post(ctx, body)
 	if err != nil {
 		return "", err
-	}
-	req.Header.Set("content-type", "application/json")
-	req.Header.Set("x-api-key", c.apiKey)
-	req.Header.Set("anthropic-version", apiVersion)
-
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("anthropic request: %w", err)
-	}
-	defer resp.Body.Close()
-	raw, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("read anthropic response: %w", err)
 	}
 
 	var parsed responseBody
 	if err := json.Unmarshal(raw, &parsed); err != nil {
 		return "", fmt.Errorf("decode anthropic response: %w", err)
 	}
-	if resp.StatusCode != http.StatusOK {
+	if status != http.StatusOK {
 		msg := "non-200 from anthropic"
 		if parsed.Error != nil {
 			msg = parsed.Error.Message
 		}
-		return "", fmt.Errorf("anthropic %d: %s", resp.StatusCode, msg)
+		return "", fmt.Errorf("anthropic %d: %s", status, msg)
 	}
 
 	var out strings.Builder

@@ -11,7 +11,9 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/alehturbal/nutrition/backend/internal/assistant"
 	"github.com/alehturbal/nutrition/backend/internal/auth"
+	"github.com/alehturbal/nutrition/backend/internal/chat"
 	"github.com/alehturbal/nutrition/backend/internal/config"
 	"github.com/alehturbal/nutrition/backend/internal/db"
 	"github.com/alehturbal/nutrition/backend/internal/httpapi"
@@ -52,16 +54,21 @@ func run() error {
 
 	llmClient := llm.New(cfg.AnthropicAPIKey, cfg.LLMModel)
 
+	productStore := products.NewStore(pool)
+	recipeStore := recipes.NewStore(pool)
+
 	handlers := &httpapi.Handlers{
 		Auth:         authSvc,
 		Users:        store,
 		Tokens:       tokens,
-		Products:     products.NewStore(pool),
-		Recipes:      recipes.NewStore(pool),
+		Products:     productStore,
+		Recipes:      recipeStore,
 		MealPlans:    mealplans.NewStore(pool),
 		StoreMatcher: stores.NewService(llmClient),
 		StoreStore:   stores.NewStore(pool),
 		RecipeGen:    recipes.NewGenerator(llmClient),
+		Chat:         chat.NewStore(pool),
+		Assistant:    assistant.New(llmClient, httpapi.NewStoreData(store, productStore, recipeStore)),
 	}
 
 	srv := &http.Server{

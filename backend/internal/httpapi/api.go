@@ -12,7 +12,9 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
+	"github.com/alehturbal/nutrition/backend/internal/assistant"
 	"github.com/alehturbal/nutrition/backend/internal/auth"
+	"github.com/alehturbal/nutrition/backend/internal/chat"
 	"github.com/alehturbal/nutrition/backend/internal/mealplans"
 	"github.com/alehturbal/nutrition/backend/internal/nutrition"
 	"github.com/alehturbal/nutrition/backend/internal/products"
@@ -42,6 +44,8 @@ type Handlers struct {
 	StoreMatcher StoreMatcher
 	StoreStore   *stores.Store
 	RecipeGen    RecipeGenerator
+	Chat         *chat.Store
+	Assistant    *assistant.Assistant
 }
 
 // Router builds the chi router with all routes wired up.
@@ -93,6 +97,14 @@ func (h *Handlers) Router() http.Handler {
 			r.Post("/stores/match", h.storeMatch)
 			r.Get("/stores/matches/{planID}", h.getStoreMatches)
 			r.Post("/recipes/generate", h.generateRecipe)
+
+			r.Route("/chat/threads", func(r chi.Router) {
+				r.Get("/", h.listThreads)
+				r.Post("/", h.createThread)
+				r.Delete("/{id}", h.deleteThread)
+				r.Get("/{id}/messages", h.listMessages)
+				r.Post("/{id}/messages", h.postMessage)
+			})
 		})
 	})
 
