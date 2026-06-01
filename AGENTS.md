@@ -44,13 +44,15 @@ docker run --rm -v "$PWD/backend":/app -w /app golang:1.25-alpine \
 
 Integration tests live in `internal/httpapi` and are **skipped unless**
 `NUTRITION_TEST_DATABASE_URL` is set. They drop and re-migrate all tables each
-run. Start Postgres first, then point the test container at it via
-`host.docker.internal`:
+run, so they **must point at a dedicated database** — the bootstrap refuses any
+database whose name does not contain `test` and creates it if missing, keeping
+the dev `nutrition` DB safe. Start Postgres first, then point the test container
+at `nutrition_test` via `host.docker.internal`:
 
 ```bash
 docker compose -f deploy/docker-compose.yml up -d postgres   # wait for healthy
 docker run --rm --add-host=host.docker.internal:host-gateway \
-  -e NUTRITION_TEST_DATABASE_URL='postgres://nutrition:nutrition@host.docker.internal:5432/nutrition?sslmode=disable' \
+  -e NUTRITION_TEST_DATABASE_URL='postgres://nutrition:nutrition@host.docker.internal:5432/nutrition_test?sslmode=disable' \
   -v "$PWD/backend":/app -w /app golang:1.25-alpine \
   go test ./internal/httpapi/ -v
 ```

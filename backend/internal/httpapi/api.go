@@ -189,6 +189,10 @@ func (h *Handlers) putProfile(w http.ResponseWriter, r *http.Request) {
 		MealSlots:     req.MealSlots,
 	})
 	if err != nil {
+		if errors.Is(err, users.ErrUserMissing) {
+			writeError(w, http.StatusUnauthorized, "session no longer valid; please sign in again")
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "could not save profile")
 		return
 	}

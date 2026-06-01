@@ -18,6 +18,9 @@ var (
 	ErrNotFound = errors.New("not found")
 	// ErrEmailTaken is returned when registering an already-used email.
 	ErrEmailTaken = errors.New("email already registered")
+	// ErrUserMissing is returned when an operation references a user_id that no
+	// longer exists (e.g. a still-valid token after the DB was reset).
+	ErrUserMissing = errors.New("user does not exist")
 )
 
 // User is an account record.
@@ -117,6 +120,10 @@ func (s *Store) UpsertProfile(ctx context.Context, p Profile) (Profile, error) {
 		p.UserID, p.Sex, p.HeightCm, p.Age, p.ActivityLevel, p.Goal, p.ProteinPerKg, p.FatPct, p.MealSlots,
 	).Scan(&p.UserID, &p.Sex, &p.HeightCm, &p.Age, &p.ActivityLevel, &p.Goal, &p.ProteinPerKg, &p.FatPct, &p.MealSlots, &p.UpdatedAt)
 	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23503" { // foreign_key_violation
+			return Profile{}, ErrUserMissing
+		}
 		return Profile{}, fmt.Errorf("upsert profile: %w", err)
 	}
 	return p, nil

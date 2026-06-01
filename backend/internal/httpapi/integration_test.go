@@ -4,11 +4,19 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/alehturbal/nutrition/backend/internal/auth"
 	"github.com/alehturbal/nutrition/backend/internal/db"
@@ -21,9 +29,44 @@ import (
 	"github.com/alehturbal/nutrition/backend/internal/users"
 )
 
-// These tests require a throwaway PostgreSQL database. Set NUTRITION_TEST_DATABASE_URL
-// (the docker-compose stack provides one) to run them; otherwise they are skipped.
-func newServer(t *testing.T) *httptest.Server {
+// These tests require a throwaway PostgreSQL database whose name contains
+// "test" — see bootstrapDB. Set NUTRITION_TEST_DATABASE_URL (the docker-compose
+// stack provides one) to run them; otherwise they are skipped.
+
+// ensureTestDatabase refuses to touch a database whose name does not look like a
+// test database (guarding the dev DB), then creates the target database if it
+// does not yet exist by connecting to the "postgres" maintenance database.
+func ensureTestDatabase(ctx context.Context, dsn string) error {
+	u, err := url.Parse(dsn)
+	if err != nil {
+		return fmt.Errorf("parse dsn: %w", err)
+	}
+	name := strings.TrimPrefix(u.Path, "/")
+	if !strings.Contains(name, "test") {
+		return fmt.Errorf("refusing to run destructive tests against database %q: its name must contain \"test\"", name)
+	}
+
+	admin := *u
+	admin.Path = "/postgres"
+	conn, err := pgx.Connect(ctx, admin.String())
+	if err != nil {
+		return fmt.Errorf("connect maintenance db: %w", err)
+	}
+	defer conn.Close(ctx)
+
+	if _, err := conn.Exec(ctx, "CREATE DATABASE "+pgx.Identifier{name}.Sanitize()); err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "42P04" { // duplicate_database
+			return nil
+		}
+		return fmt.Errorf("create database %q: %w", name, err)
+	}
+	return nil
+}
+
+// bootstrapDB connects to the isolated test database (creating it if needed) and
+// returns a pool against a freshly migrated, empty schema.
+func bootstrapDB(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 	dsn := os.Getenv("NUTRITION_TEST_DATABASE_URL")
 	if dsn == "" {
@@ -31,6 +74,9 @@ func newServer(t *testing.T) *httptest.Server {
 	}
 
 	ctx := context.Background()
+	if err := ensureTestDatabase(ctx, dsn); err != nil {
+		t.Fatalf("ensure test database: %v", err)
+	}
 	pool, err := db.Connect(ctx, dsn)
 	if err != nil {
 		t.Fatalf("connect: %v", err)
@@ -44,7 +90,19 @@ func newServer(t *testing.T) *httptest.Server {
 	if err := db.Migrate(ctx, pool); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
+	return pool
+}
 
+func newServer(t *testing.T) *httptest.Server {
+	srv, _ := newServerWithPool(t)
+	return srv
+}
+
+// newServerWithPool is like newServer but also returns the underlying pool so a
+// test can manipulate the database directly.
+func newServerWithPool(t *testing.T) (*httptest.Server, *pgxpool.Pool) {
+	t.Helper()
+	pool := bootstrapDB(t)
 	store := users.NewStore(pool)
 	tokens := auth.NewManager("test-secret", time.Hour)
 	h := &httpapi.Handlers{
@@ -60,27 +118,12 @@ func newServer(t *testing.T) *httptest.Server {
 	}
 	srv := httptest.NewServer(h.Router())
 	t.Cleanup(srv.Close)
-	return srv
+	return srv, pool
 }
 
 func newServerNoLLM(t *testing.T) *httptest.Server {
 	t.Helper()
-	dsn := os.Getenv("NUTRITION_TEST_DATABASE_URL")
-	if dsn == "" {
-		t.Skip("set NUTRITION_TEST_DATABASE_URL to run integration tests")
-	}
-	ctx := context.Background()
-	pool, err := db.Connect(ctx, dsn)
-	if err != nil {
-		t.Fatalf("connect: %v", err)
-	}
-	t.Cleanup(pool.Close)
-	if _, err := pool.Exec(ctx, `DROP TABLE IF EXISTS store_match_items, store_matches, meal_plan_items, meal_plans, recipe_ingredients, recipes, products, weight_entries, profiles, users, schema_migrations CASCADE`); err != nil {
-		t.Fatalf("reset schema: %v", err)
-	}
-	if err := db.Migrate(ctx, pool); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
+	pool := bootstrapDB(t)
 	store := users.NewStore(pool)
 	tokens := auth.NewManager("test-secret", time.Hour)
 	var nilClient *llm.Client // unconfigured
@@ -177,6 +220,36 @@ func TestAuthRequired(t *testing.T) {
 	resp, _ := doJSON(t, http.MethodGet, srv.URL+"/api/profile", "", nil)
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Errorf("expected 401 without token, got %d", resp.StatusCode)
+	}
+}
+
+// TestProfileWithDeletedUser reproduces the stale-JWT case: a token stays valid
+// after its user row is gone (e.g. the DB was reset). Saving a profile must come
+// back as 401 so the client drops the token, not 500.
+func TestProfileWithDeletedUser(t *testing.T) {
+	srv, pool := newServerWithPool(t)
+
+	resp, out := doJSON(t, http.MethodPost, srv.URL+"/api/auth/register", "",
+		map[string]string{"email": "ghost@example.com", "password": "supersecret"})
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("register status = %d, body %v", resp.StatusCode, out)
+	}
+	token, _ := out["token"].(string)
+	if token == "" {
+		t.Fatal("expected token from register")
+	}
+
+	// The user vanishes while the token lives on.
+	if _, err := pool.Exec(context.Background(), `DELETE FROM users`); err != nil {
+		t.Fatalf("delete users: %v", err)
+	}
+
+	resp, out = doJSON(t, http.MethodPut, srv.URL+"/api/profile", token, map[string]any{
+		"sex": "male", "height_cm": 180, "age": 30,
+		"activity_level": "moderate", "goal": "maintain",
+	})
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("put profile after user deleted = %d, want 401; body %v", resp.StatusCode, out)
 	}
 }
 
