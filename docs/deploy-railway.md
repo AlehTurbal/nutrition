@@ -27,49 +27,83 @@ This creates a `Postgres` service exposing `DATABASE_URL` for reference.
 
 ## 3. Create the two app services
 
-In the Railway dashboard (Project → New → Empty Service), create two services and
-set each one's **Settings → Root Directory**:
-
-| Service name | Root Directory | Public domain? |
-|--------------|----------------|----------------|
-| `backend`    | `backend`      | No             |
-| `frontend`   | `frontend`     | Yes            |
-
-Each service auto-detects its `railway.json` and builds the Dockerfile there.
+```bash
+railway add --service backend --json
+railway add --service frontend --json
+```
 
 > The service **must be named `backend`** — the frontend references it by name
 > in `BACKEND_URL` below. If you name it differently, update that variable.
 
+### Scope each service to its subdirectory + Dockerfile builder
+
+`railway up` uploads the **whole git repo root**, so Railway needs to know which
+subdirectory each service builds from. Without this it falls back to Railpack on
+the repo root and the build fails (`Railpack could not determine how to build`).
+Set the root directory **and** force the Dockerfile builder. Resolve the service
+IDs first (`railway service list --json`), then patch config (names don't work in
+JSON patches — use IDs):
+
+```bash
+railway environment edit --json <<'JSON'
+{"services":{
+  "<BACKEND_SERVICE_ID>":{"source":{"rootDirectory":"/backend"},"build":{"builder":"DOCKERFILE","dockerfilePath":"Dockerfile"}},
+  "<FRONTEND_SERVICE_ID>":{"source":{"rootDirectory":"/frontend"},"build":{"builder":"DOCKERFILE","dockerfilePath":"Dockerfile"}}
+}}
+JSON
+```
+
+(Equivalently in the dashboard: each service → Settings → **Root Directory** =
+`backend` / `frontend`, **Builder** = Dockerfile. `dockerfilePath` is relative to
+the root directory, so it's just `Dockerfile`.)
+
 ## 4. Configure environment variables
 
-**Backend service** (Settings → Variables):
+`PORT` is **not** auto-injected by Railway — set it explicitly so the apps and the
+`BACKEND_URL` reference are deterministic.
 
-| Variable | Value |
-|----------|-------|
-| `DATABASE_URL` | `${{Postgres.DATABASE_URL}}` (reference variable) |
-| `JWT_SECRET` | a strong random secret — generate with `openssl rand -base64 48` |
-| `ANTHROPIC_API_KEY` | your Anthropic API key |
-| `LLM_MODEL` | optional; omit to use the default `claude-opus-4-8` |
+**Backend service:**
 
-Railway injects `PORT` automatically; the backend already reads it.
+```bash
+railway variable set PORT=8080 --service backend --skip-deploys
+railway variable set 'DATABASE_URL=${{Postgres.DATABASE_URL}}' --service backend --skip-deploys
+SECRET=$(openssl rand -base64 48)
+printf "%s" "$SECRET" | railway variable set JWT_SECRET --stdin --service backend --skip-deploys
+# LLM_MODEL is optional; the backend defaults to claude-opus-4-8.
+```
 
-**Frontend service** (Settings → Variables):
+Set your Anthropic key (kept out of shell history via stdin):
 
-| Variable | Value |
-|----------|-------|
-| `BACKEND_URL` | `http://${{backend.RAILWAY_PRIVATE_DOMAIN}}:${{backend.PORT}}` |
+```bash
+printf "%s" "sk-ant-..." | railway variable set ANTHROPIC_API_KEY --stdin --service backend
+```
 
-Railway injects `PORT` automatically; nginx listens on it.
+Without `ANTHROPIC_API_KEY` the app runs fine but LLM/chat endpoints return 503.
+
+**Frontend service:**
+
+```bash
+railway variable set PORT=8080 --service frontend --skip-deploys
+railway variable set 'BACKEND_URL=http://${{backend.RAILWAY_PRIVATE_DOMAIN}}:${{backend.PORT}}' --service frontend --skip-deploys
+```
+
+nginx listens on `$PORT`; the `${{backend.PORT}}` reference resolves to the `PORT`
+you set on the backend (8080).
 
 ## 5. Deploy
 
-From each service directory (or use `railway service` to select), push the code:
+From the **repo root** (so the upload includes each service's subdirectory):
 
 ```bash
-railway up        # run once per service, or trigger deploys from the dashboard
+railway up --service backend  --detach -m "backend deploy"
+railway up --service frontend --detach -m "frontend deploy"
 ```
 
-Then, on the **frontend** service only: Settings → Networking → **Generate Domain**.
+Generate a public domain on the **frontend** only, routed to its port:
+
+```bash
+railway domain --service frontend --port 8080 --json
+```
 
 ## 6. Smoke test
 
@@ -91,10 +125,18 @@ the key is missing).
 
 ## Troubleshooting
 
-- **Frontend 502 on `/api`:** the backend isn't reachable on the private network.
-  Confirm the backend service is named `backend`, is deployed and healthy, and
-  that `BACKEND_URL` resolves to `…RAILWAY_PRIVATE_DOMAIN…:…PORT…`. Check the
-  rendered config in the frontend deploy logs (`nginx -t` runs at startup).
+- **Build fails with `Railpack could not determine how to build the app`** and the
+  analyzed tree shows the whole repo root: the service's root directory / Dockerfile
+  builder isn't set. Apply the config patch in step 3.
+- **Frontend 502 on everything (including `/`):** the nginx container is
+  crashlooping — check `railway logs --service frontend`. A known cause is
+  `invalid port in resolver "fd12::10"`: Railway's internal DNS is IPv6 and nginx
+  needs it bracketed (`[fd12::10]`). The entrypoint (`frontend/docker-entrypoint.sh`)
+  already brackets IPv6 resolvers; this note is here in case the logic regresses.
+- **Frontend 502 only on `/api` (static `/` works):** the backend isn't reachable
+  on the private network. Confirm it's named `backend`, deployed and healthy
+  (`railway logs --service backend` should show `listening on :8080`), and that
+  `BACKEND_URL` resolves to `…RAILWAY_PRIVATE_DOMAIN…:…PORT…`.
 - **Backend boot loop logging `DATABASE_URL is required`:** the `DATABASE_URL`
   reference variable isn't set or the Postgres service isn't linked.
 - **`401` after login works briefly:** `JWT_SECRET` changed between deploys; set a
