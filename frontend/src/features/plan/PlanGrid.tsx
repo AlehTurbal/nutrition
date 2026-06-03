@@ -31,22 +31,25 @@ function RemainingCell({
   target: { calories: number; protein_g: number; fat_g: number; carbs_g: number } | null;
 }) {
   const approx = planned.complete ? "" : "≈";
-  const rows: [string, number, boolean][] = target
+  // [label, value, signed (=is a remainder), norm]. When a daily target exists
+  // each row shows the remaining amount plus the target norm in parentheses,
+  // e.g. "120 (170)".
+  const rows: [string, number, boolean, number | null][] = target
     ? [
-        ["ккал", target.calories - planned.kcal, true],
-        ["Б", target.protein_g - planned.protein, true],
-        ["Ж", target.fat_g - planned.fat, true],
-        ["У", target.carbs_g - planned.carbs, true],
+        ["ккал", target.calories - planned.kcal, true, target.calories],
+        ["Б", target.protein_g - planned.protein, true, target.protein_g],
+        ["Ж", target.fat_g - planned.fat, true, target.fat_g],
+        ["У", target.carbs_g - planned.carbs, true, target.carbs_g],
       ]
     : [
-        ["ккал", planned.kcal, false],
-        ["Б", planned.protein, false],
-        ["Ж", planned.fat, false],
-        ["У", planned.carbs, false],
+        ["ккал", planned.kcal, false, null],
+        ["Б", planned.protein, false, null],
+        ["Ж", planned.fat, false, null],
+        ["У", planned.carbs, false, null],
       ];
   return (
     <div className="space-y-0.5 text-xs">
-      {rows.map(([label, value, signed]) => (
+      {rows.map(([label, value, signed, norm]) => (
         <div key={label} className="flex justify-between gap-2">
           <span className="text-slate-400">{label}</span>
           <span
@@ -56,6 +59,9 @@ function RemainingCell({
           >
             {approx}
             {fmt(value)}
+            {norm != null && (
+              <span className="text-slate-400"> ({fmt(norm)})</span>
+            )}
           </span>
         </div>
       ))}

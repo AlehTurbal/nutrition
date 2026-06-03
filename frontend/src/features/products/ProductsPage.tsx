@@ -71,6 +71,8 @@ export default function ProductsPage() {
                   <th className="py-2 text-right">Б</th>
                   <th className="py-2 text-right">Ж</th>
                   <th className="py-2 text-right">У</th>
+                  <th className="py-2 text-right">Клет.</th>
+                  <th className="py-2 text-right">ГИ</th>
                   <th className="py-2"></th>
                 </tr>
               </thead>
@@ -83,6 +85,8 @@ export default function ProductsPage() {
                     <td className="py-2 text-right">{cell(p.protein100)}</td>
                     <td className="py-2 text-right">{cell(p.fat100)}</td>
                     <td className="py-2 text-right">{cell(p.carbs100)}</td>
+                    <td className="py-2 text-right">{cell(p.fiber100)}</td>
+                    <td className="py-2 text-right">{cell(p.glycemic_index)}</td>
                     <td className="py-2 text-right">
                       <div className="flex justify-end gap-2">
                         <Button variant="ghost" onClick={() => setEditing(p)}>

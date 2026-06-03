@@ -27,8 +27,10 @@ const systemPrompt = `Ты — ассистент приложения для п
 - get_targets — суточные цели КБЖУ (может вернуть ошибку, если не заполнен профиль или вес).
 
 Инструменты изменения (НЕ выполняются сразу — становятся предложением, которое пользователь подтверждает кнопкой «Применить»):
-- propose_product — предложить создать продукт (БЖУ на 100 г);
+- propose_product — предложить создать продукт (БЖУ на 100 г; можно указать fiber100 — клетчатку на 100 г и glycemic_index — гликемический индекс 0–100);
 - propose_recipe — предложить создать рецепт. Ингредиенты ссылаются на product_id из list_products. ОБЯЗАТЕЛЬНО сначала вызови list_products, чтобы взять реальные id. Если нужного продукта нет, не выдумывай id: вместо этого попроси пользователя сначала создать продукт (или предложи его через propose_product).
+
+Когда пользователь просит добавить/создать/сохранить продукт или рецепт — ВСЕГДА вызывай соответствующий инструмент (propose_product/propose_recipe) с конкретными значениями, а не описывай их текстом. БЖУ и калорийность оцени сам по названию продукта (пользователь сможет поправить перед применением). У продукта обязательно должно быть название: если из запроса непонятно, какой именно продукт нужен, задай один короткий уточняющий вопрос, и как только название известно — сразу вызывай propose_product.
 
 Никогда не утверждай, что что-то создано: изменения применяет только пользователь.`
 
@@ -55,14 +57,16 @@ var toolDefs = []llm.Tool{
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"name":       map[string]any{"type": "string"},
-				"category":   map[string]any{"type": "string"},
-				"brand":      map[string]any{"type": "string"},
-				"kcal100":    map[string]any{"type": "number"},
-				"protein100": map[string]any{"type": "number"},
-				"fat100":     map[string]any{"type": "number"},
-				"carbs100":   map[string]any{"type": "number"},
-				"source":     map[string]any{"type": "string"},
+				"name":           map[string]any{"type": "string"},
+				"category":       map[string]any{"type": "string"},
+				"brand":          map[string]any{"type": "string"},
+				"kcal100":        map[string]any{"type": "number"},
+				"protein100":     map[string]any{"type": "number"},
+				"fat100":         map[string]any{"type": "number"},
+				"carbs100":       map[string]any{"type": "number"},
+				"fiber100":       map[string]any{"type": "number"},
+				"glycemic_index": map[string]any{"type": "number"},
+				"source":         map[string]any{"type": "string"},
 			},
 			"required": []string{"name"},
 		},

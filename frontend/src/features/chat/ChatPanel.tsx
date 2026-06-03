@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import {
   useChatMessages,
   useChatThreads,
@@ -17,6 +17,7 @@ import { Button } from "../../components/ui";
 
 interface PendingProposal {
   key: string;
+  messageId: number;
   proposal: ChatProposal;
   applied: boolean;
   error?: string;
@@ -48,6 +49,12 @@ export default function ChatPanel() {
     feedRef.current?.scrollTo({ top: feedRef.current.scrollHeight });
   }, [messages.data, proposals, send.isPending]);
 
+  // Proposals are ephemeral client state tied to one thread; drop them when the
+  // active thread changes so they don't leak into another conversation.
+  useEffect(() => {
+    setProposals([]);
+  }, [activeId]);
+
   async function startThread() {
     const t = await createThread.mutateAsync("Новый чат");
     setActiveId(t.id);
@@ -73,6 +80,7 @@ export default function ChatPanel() {
           ...prev,
           ...res.proposals.map((proposal, i) => ({
             key: `${res.message.id}-${i}`,
+            messageId: res.message.id,
             proposal,
             applied: false,
           })),
@@ -105,6 +113,14 @@ export default function ChatPanel() {
   function rejectProposal(key: string) {
     setProposals((ps) => ps.filter((x) => x.key !== key));
   }
+
+  // Proposals render inline under their assistant message. A just-created
+  // proposal whose message hasn't been refetched yet is shown at the bottom as a
+  // fallback so it never flickers out of view.
+  const loadedMessageIds = new Set(messages.data?.map((m) => m.id) ?? []);
+  const orphanProposals = proposals.filter(
+    (p) => !loadedMessageIds.has(p.messageId),
+  );
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -156,16 +172,27 @@ export default function ChatPanel() {
           </p>
         ) : (
           messages.data?.map((m) => (
-            <div
-              key={m.id}
-              className={
-                m.role === "user"
-                  ? "ml-6 rounded-lg bg-brand-50 px-3 py-2 text-sm text-slate-800"
-                  : "mr-6 rounded-lg bg-slate-100 px-3 py-2 text-sm text-slate-700"
-              }
-            >
-              {m.content}
-            </div>
+            <Fragment key={m.id}>
+              <div
+                className={
+                  m.role === "user"
+                    ? "ml-6 rounded-lg bg-brand-50 px-3 py-2 text-sm text-slate-800"
+                    : "mr-6 rounded-lg bg-slate-100 px-3 py-2 text-sm text-slate-700"
+                }
+              >
+                {m.content}
+              </div>
+              {proposals
+                .filter((p) => p.messageId === m.id)
+                .map((p) => (
+                  <ProposalCard
+                    key={p.key}
+                    pending={p}
+                    onApply={() => applyProposal(p)}
+                    onReject={() => rejectProposal(p.key)}
+                  />
+                ))}
+            </Fragment>
           ))
         )}
 
@@ -175,7 +202,7 @@ export default function ChatPanel() {
           </div>
         )}
 
-        {proposals.map((p) => (
+        {orphanProposals.map((p) => (
           <ProposalCard
             key={p.key}
             pending={p}

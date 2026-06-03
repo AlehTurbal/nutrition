@@ -66,6 +66,7 @@ export interface Product {
   protein100: number | null;
   fat100: number | null;
   carbs100: number | null;
+  fiber100: number | null;
   glycemic_index: number | null;
   source: string;
   created_at: string;
@@ -80,6 +81,7 @@ export interface ProductInput {
   protein100: number | null;
   fat100: number | null;
   carbs100: number | null;
+  fiber100: number | null;
   glycemic_index: number | null;
 }
 

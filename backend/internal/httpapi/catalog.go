@@ -19,14 +19,16 @@ var validMealTypes = map[string]bool{
 // --- products ---
 
 type productRequest struct {
-	Name       string   `json:"name"`
-	Category   string   `json:"category"`
-	Brand      string   `json:"brand"`
-	Kcal100    *float64 `json:"kcal100"`
-	Protein100 *float64 `json:"protein100"`
-	Fat100     *float64 `json:"fat100"`
-	Carbs100   *float64 `json:"carbs100"`
-	Source     string   `json:"source"`
+	Name          string   `json:"name"`
+	Category      string   `json:"category"`
+	Brand         string   `json:"brand"`
+	Kcal100       *float64 `json:"kcal100"`
+	Protein100    *float64 `json:"protein100"`
+	Fat100        *float64 `json:"fat100"`
+	Carbs100      *float64 `json:"carbs100"`
+	Fiber100      *float64 `json:"fiber100"`
+	GlycemicIndex *float64 `json:"glycemic_index"`
+	Source        string   `json:"source"`
 }
 
 func (req productRequest) toProduct(userID, id int64) products.Product {
@@ -34,7 +36,9 @@ func (req productRequest) toProduct(userID, id int64) products.Product {
 		ID: id, UserID: userID,
 		Name: req.Name, Category: req.Category, Brand: req.Brand,
 		Kcal100: req.Kcal100, Protein100: req.Protein100,
-		Fat100: req.Fat100, Carbs100: req.Carbs100, Source: req.Source,
+		Fat100: req.Fat100, Carbs100: req.Carbs100,
+		Fiber100:      req.Fiber100,
+		GlycemicIndex: req.GlycemicIndex, Source: req.Source,
 	}
 }
 
@@ -122,6 +126,10 @@ func (h *Handlers) deleteProduct(w http.ResponseWriter, r *http.Request) {
 	err := h.Products.Delete(r.Context(), userID, id)
 	if errors.Is(err, products.ErrNotFound) {
 		writeError(w, http.StatusNotFound, "product not found")
+		return
+	}
+	if errors.Is(err, products.ErrInUse) {
+		writeError(w, http.StatusConflict, "Продукт используется в рецептах — сначала удалите его оттуда")
 		return
 	}
 	if err != nil {

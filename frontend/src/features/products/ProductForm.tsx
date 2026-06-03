@@ -30,6 +30,8 @@ export default function ProductForm({
   const [protein, setProtein] = useState(str(initial?.protein100 ?? null));
   const [fat, setFat] = useState(str(initial?.fat100 ?? null));
   const [carbs, setCarbs] = useState(str(initial?.carbs100 ?? null));
+  const [fiber, setFiber] = useState(str(initial?.fiber100 ?? null));
+  const [gi, setGi] = useState(str(initial?.glycemic_index ?? null));
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -41,6 +43,8 @@ export default function ProductForm({
       protein100: numOrNull(protein),
       fat100: numOrNull(fat),
       carbs100: numOrNull(carbs),
+      fiber100: numOrNull(fiber),
+      glycemic_index: numOrNull(gi),
     });
   };
 
@@ -79,12 +83,25 @@ export default function ProductForm({
             ✨ Заполнить через LLM
           </button>
         </div>
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
           <Field label="Ккал" type="number" step="0.1" min={0} value={kcal} onChange={(e) => setKcal(e.target.value)} />
           <Field label="Белки" type="number" step="0.1" min={0} value={protein} onChange={(e) => setProtein(e.target.value)} />
           <Field label="Жиры" type="number" step="0.1" min={0} value={fat} onChange={(e) => setFat(e.target.value)} />
           <Field label="Углеводы" type="number" step="0.1" min={0} value={carbs} onChange={(e) => setCarbs(e.target.value)} />
+          <Field label="Клетчатка" type="number" step="0.1" min={0} value={fiber} onChange={(e) => setFiber(e.target.value)} />
         </div>
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-3">
+        <Field
+          label="Гликемический индекс (0–100)"
+          type="number"
+          step="1"
+          min={0}
+          max={100}
+          value={gi}
+          onChange={(e) => setGi(e.target.value)}
+        />
       </div>
 
       {error != null && <ErrorBox error={error} />}
