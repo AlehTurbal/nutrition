@@ -40,6 +40,7 @@ type DataSource interface {
 	ListProducts(ctx context.Context, userID int64) (any, error)
 	ListRecipes(ctx context.Context, userID int64) (any, error)
 	GetTargets(ctx context.Context, userID int64) (any, error)
+	ListMealPlans(ctx context.Context, userID int64) (any, error)
 }
 
 // Assistant pairs a tool-capable LLM with a per-user data source.
@@ -89,13 +90,13 @@ func (a *Assistant) Reply(ctx context.Context, userID int64, history []Turn, use
 				continue
 			}
 			switch b.Name {
-			case toolListProducts, toolListRecipes, toolGetTargets:
+			case toolListProducts, toolListRecipes, toolGetTargets, toolListMealPlans:
 				results = append(results, llm.ContentBlock{
 					Type:      "tool_result",
 					ToolUseID: b.ID,
 					Content:   a.runRead(ctx, userID, b.Name),
 				})
-			case toolProposeProduct, toolProposeRecipe:
+			case toolProposeProduct, toolProposeRecipe, toolProposeCopyDay:
 				p, err := parseProposal(b.Name, b.Input)
 				if err != nil {
 					results = append(results, toolErr(b.ID, err))
@@ -130,6 +131,8 @@ func (a *Assistant) runRead(ctx context.Context, userID int64, name string) stri
 		v, err = a.data.ListRecipes(ctx, userID)
 	case toolGetTargets:
 		v, err = a.data.GetTargets(ctx, userID)
+	case toolListMealPlans:
+		v, err = a.data.ListMealPlans(ctx, userID)
 	}
 	if err != nil {
 		b, _ := json.Marshal(map[string]string{"error": err.Error()})

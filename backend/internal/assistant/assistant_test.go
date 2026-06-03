@@ -43,6 +43,7 @@ func (d *stubData) ListRecipes(context.Context, int64) (any, error) { return []a
 func (d *stubData) GetTargets(context.Context, int64) (any, error) {
 	return nil, errors.New("set profile first")
 }
+func (d *stubData) ListMealPlans(context.Context, int64) (any, error) { return []any{}, nil }
 
 func toolUse(id, name, input string) llm.ContentBlock {
 	return llm.ContentBlock{Type: "tool_use", ID: id, Name: name, Input: json.RawMessage(input)}
@@ -148,6 +149,9 @@ func TestParseProposal(t *testing.T) {
 		{"missing name", toolProposeProduct, `{"kcal100":60}`, "", true},
 		{"bad json", toolProposeProduct, `not json`, "", true},
 		{"not a proposal tool", toolListProducts, `{"name":"x"}`, "", true},
+		{"copy day", toolProposeCopyDay, `{"plan_id":1,"source_date":"2026-06-01","target_dates":["2026-06-02"]}`, "copy_day", false},
+		{"copy day no targets", toolProposeCopyDay, `{"plan_id":1,"source_date":"2026-06-01","target_dates":[]}`, "", true},
+		{"copy day no source", toolProposeCopyDay, `{"plan_id":1,"target_dates":["2026-06-02"]}`, "", true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

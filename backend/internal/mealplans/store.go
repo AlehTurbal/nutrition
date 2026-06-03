@@ -210,6 +210,93 @@ func (s *Store) AddItem(ctx context.Context, userID int64, it Item) (Item, error
 	return it, nil
 }
 
+// CopyDay replaces the items of each target day with copies of the source day's
+// items, within one plan owned by the user. Targets equal to the source are
+// skipped. Returns the newly created items. ErrNotFound if the plan is missing.
+func (s *Store) CopyDay(ctx context.Context, userID, planID int64, source Date, targets []Date) ([]Item, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+
+	var owns bool
+	if err := tx.QueryRow(ctx,
+		`SELECT EXISTS(SELECT 1 FROM meal_plans WHERE id = $1 AND user_id = $2)`,
+		planID, userID).Scan(&owns); err != nil {
+		return nil, fmt.Errorf("verify plan: %w", err)
+	}
+	if !owns {
+		return nil, ErrNotFound
+	}
+
+	// Load the source day's items.
+	rows, err := tx.Query(ctx,
+		`SELECT mpi.meal_slot, mpi.recipe_id, r.name, mpi.servings
+		 FROM meal_plan_items mpi JOIN recipes r ON r.id = mpi.recipe_id
+		 WHERE mpi.meal_plan_id = $1 AND mpi.day_date = $2
+		 ORDER BY mpi.meal_slot, mpi.id`, planID, source.Time)
+	if err != nil {
+		return nil, fmt.Errorf("load source items: %w", err)
+	}
+	type srcItem struct {
+		slot       string
+		recipeID   int64
+		recipeName string
+		servings   float64
+	}
+	var src []srcItem
+	for rows.Next() {
+		var it srcItem
+		if err := rows.Scan(&it.slot, &it.recipeID, &it.recipeName, &it.servings); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("scan source item: %w", err)
+		}
+		src = append(src, it)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	out := []Item{}
+	for _, target := range targets {
+		if target.Time.Equal(source.Time) {
+			continue
+		}
+		// Replace: clear the target day first.
+		if _, err := tx.Exec(ctx,
+			`DELETE FROM meal_plan_items WHERE meal_plan_id = $1 AND day_date = $2`,
+			planID, target.Time); err != nil {
+			return nil, fmt.Errorf("clear target day: %w", err)
+		}
+		for _, it := range src {
+			var newID int64
+			if err := tx.QueryRow(ctx,
+				`INSERT INTO meal_plan_items (meal_plan_id, day_date, meal_slot, recipe_id, servings)
+				 VALUES ($1,$2,$3,$4,$5) RETURNING id`,
+				planID, target.Time, it.slot, it.recipeID, it.servings,
+			).Scan(&newID); err != nil {
+				return nil, fmt.Errorf("insert copied item: %w", err)
+			}
+			out = append(out, Item{
+				ID:         newID,
+				MealPlanID: planID,
+				DayDate:    target,
+				MealSlot:   it.slot,
+				RecipeID:   it.recipeID,
+				RecipeName: it.recipeName,
+				Servings:   it.servings,
+			})
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // DeleteItem removes one item from a plan owned by the user. ErrNotFound if missing.
 func (s *Store) DeleteItem(ctx context.Context, userID, planID, itemID int64) error {
 	tag, err := s.pool.Exec(ctx,

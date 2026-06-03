@@ -13,8 +13,10 @@ const (
 	toolListProducts   = "list_products"
 	toolListRecipes    = "list_recipes"
 	toolGetTargets     = "get_targets"
+	toolListMealPlans  = "list_meal_plans"
 	toolProposeProduct = "propose_product"
 	toolProposeRecipe  = "propose_recipe"
+	toolProposeCopyDay = "propose_copy_day"
 )
 
 const systemPrompt = `Ты — ассистент приложения для питания. Помогаешь пользователю вести базу продуктов и рецептов и считать БЖУ.
@@ -24,11 +26,13 @@ const systemPrompt = `Ты — ассистент приложения для п
 Инструменты чтения (вызывай их, чтобы узнать текущие данные перед ответом):
 - list_products — список продуктов пользователя (с их id и БЖУ на 100 г);
 - list_recipes — список рецептов;
-- get_targets — суточные цели КБЖУ (может вернуть ошибку, если не заполнен профиль или вес).
+- get_targets — суточные цели КБЖУ (может вернуть ошибку, если не заполнен профиль или вес);
+- list_meal_plans — список планов питания пользователя с их id, диапазоном дат и блюдами по дням (нужно, чтобы скопировать день).
 
 Инструменты изменения (НЕ выполняются сразу — становятся предложением, которое пользователь подтверждает кнопкой «Применить»):
 - propose_product — предложить создать продукт (БЖУ на 100 г; можно указать fiber100 — клетчатку на 100 г и glycemic_index — гликемический индекс 0–100);
-- propose_recipe — предложить создать рецепт. Ингредиенты ссылаются на product_id из list_products. ОБЯЗАТЕЛЬНО сначала вызови list_products, чтобы взять реальные id. Если нужного продукта нет, не выдумывай id: вместо этого попроси пользователя сначала создать продукт (или предложи его через propose_product).
+- propose_recipe — предложить создать рецепт. Ингредиенты ссылаются на product_id из list_products. ОБЯЗАТЕЛЬНО сначала вызови list_products, чтобы взять реальные id. Если нужного продукта нет, не выдумывай id: вместо этого попроси пользователя сначала создать продукт (или предложи его через propose_product);
+- propose_copy_day — предложить скопировать блюда одного дня плана на другие дни (целевые дни будут заменены копией исходного). ОБЯЗАТЕЛЬНО сначала вызови list_meal_plans, чтобы взять реальные plan_id и даты (формат YYYY-MM-DD) — не выдумывай их. Для «всей недели» перечисли в target_dates все остальные дни плана.
 
 Когда пользователь просит добавить/создать/сохранить продукт или рецепт — ВСЕГДА вызывай соответствующий инструмент (propose_product/propose_recipe) с конкретными значениями, а не описывай их текстом. БЖУ и калорийность оцени сам по названию продукта (пользователь сможет поправить перед применением). У продукта обязательно должно быть название: если из запроса непонятно, какой именно продукт нужен, задай один короткий уточняющий вопрос, и как только название известно — сразу вызывай propose_product.
 
@@ -49,6 +53,11 @@ var toolDefs = []llm.Tool{
 	{
 		Name:        toolGetTargets,
 		Description: "Вернуть суточные цели КБЖУ пользователя.",
+		InputSchema: map[string]any{"type": "object", "properties": map[string]any{}},
+	},
+	{
+		Name:        toolListMealPlans,
+		Description: "Вернуть планы питания пользователя с id, датами и блюдами по дням.",
 		InputSchema: map[string]any{"type": "object", "properties": map[string]any{}},
 	},
 	{
@@ -99,6 +108,22 @@ var toolDefs = []llm.Tool{
 			"required": []string{"name"},
 		},
 	},
+	{
+		Name:        toolProposeCopyDay,
+		Description: "Предложить скопировать блюда одного дня плана на другие дни (целевые дни заменяются копией). Даты берутся из list_meal_plans.",
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"plan_id":     map[string]any{"type": "integer"},
+				"source_date": map[string]any{"type": "string", "description": "Исходный день, YYYY-MM-DD"},
+				"target_dates": map[string]any{
+					"type":  "array",
+					"items": map[string]any{"type": "string", "description": "YYYY-MM-DD"},
+				},
+			},
+			"required": []string{"plan_id", "source_date", "target_dates"},
+		},
+	},
 }
 
 // parseProposal converts a mutating tool call into a Proposal. It is pure: the
@@ -109,6 +134,21 @@ func parseProposal(toolName string, input json.RawMessage) (Proposal, error) {
 	if err := json.Unmarshal(input, &payload); err != nil {
 		return Proposal{}, fmt.Errorf("invalid tool input: %w", err)
 	}
+
+	switch toolName {
+	case toolProposeCopyDay:
+		if _, ok := payload["plan_id"]; !ok {
+			return Proposal{}, errors.New("copy proposal is missing plan_id")
+		}
+		if src, _ := payload["source_date"].(string); src == "" {
+			return Proposal{}, errors.New("copy proposal is missing source_date")
+		}
+		if targets, ok := payload["target_dates"].([]any); !ok || len(targets) == 0 {
+			return Proposal{}, errors.New("copy proposal is missing target_dates")
+		}
+		return Proposal{Type: "copy_day", Payload: payload}, nil
+	}
+
 	name, _ := payload["name"].(string)
 	if name == "" {
 		return Proposal{}, errors.New("proposal is missing a name")

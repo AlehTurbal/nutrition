@@ -102,6 +102,7 @@ func handlersFor(pool *pgxpool.Pool, matcher httpapi.StoreMatcher, gen httpapi.R
 	store := users.NewStore(pool)
 	productStore := products.NewStore(pool)
 	recipeStore := recipes.NewStore(pool)
+	mealPlanStore := mealplans.NewStore(pool)
 	tokens := auth.NewManager("test-secret", time.Hour)
 	return &httpapi.Handlers{
 		Auth:         auth.NewService(store, tokens),
@@ -109,12 +110,12 @@ func handlersFor(pool *pgxpool.Pool, matcher httpapi.StoreMatcher, gen httpapi.R
 		Tokens:       tokens,
 		Products:     productStore,
 		Recipes:      recipeStore,
-		MealPlans:    mealplans.NewStore(pool),
+		MealPlans:    mealPlanStore,
 		StoreMatcher: matcher,
 		StoreStore:   stores.NewStore(pool),
 		RecipeGen:    gen,
 		Chat:         chat.NewStore(pool),
-		Assistant:    assistant.New(caller, httpapi.NewStoreData(store, productStore, recipeStore)),
+		Assistant:    assistant.New(caller, httpapi.NewStoreData(store, productStore, recipeStore, mealPlanStore)),
 	}
 }
 

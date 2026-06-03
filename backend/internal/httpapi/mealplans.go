@@ -144,6 +144,76 @@ func (h *Handlers) addItem(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+type copyDayRequest struct {
+	SourceDate  string   `json:"source_date"`
+	TargetDates []string `json:"target_dates"`
+}
+
+// copyDay replaces the items of each target day with copies of the source day's
+// items. All dates must fall within the plan's range.
+func (h *Handlers) copyDay(w http.ResponseWriter, r *http.Request) {
+	userID, _ := auth.UserIDFromContext(r.Context())
+	planID, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	var req copyDayRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	source, ok := parseDate(w, req.SourceDate, "source_date")
+	if !ok {
+		return
+	}
+	if len(req.TargetDates) == 0 {
+		writeError(w, http.StatusBadRequest, "target_dates is required")
+		return
+	}
+
+	plan, err := h.MealPlans.GetPlan(r.Context(), userID, planID)
+	if errors.Is(err, mealplans.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "plan not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not load plan")
+		return
+	}
+	if !withinPlan(plan, source) {
+		writeError(w, http.StatusBadRequest, "source_date is outside the plan range")
+		return
+	}
+
+	targets := make([]mealplans.Date, 0, len(req.TargetDates))
+	for _, s := range req.TargetDates {
+		t, ok := parseDate(w, s, "target_dates")
+		if !ok {
+			return
+		}
+		if !withinPlan(plan, t) {
+			writeError(w, http.StatusBadRequest, "target_dates contains a date outside the plan range")
+			return
+		}
+		targets = append(targets, mealplans.Date{Time: t})
+	}
+
+	items, err := h.MealPlans.CopyDay(r.Context(), userID, planID, mealplans.Date{Time: source}, targets)
+	if errors.Is(err, mealplans.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "plan not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not copy day")
+		return
+	}
+	writeJSON(w, http.StatusOK, items)
+}
+
+// withinPlan reports whether d falls within [StartDate, EndDate] inclusive.
+func withinPlan(p mealplans.Plan, d time.Time) bool {
+	return !d.Before(p.StartDate.Time) && !d.After(p.EndDate.Time)
+}
+
 func (h *Handlers) deleteItem(w http.ResponseWriter, r *http.Request) {
 	userID, _ := auth.UserIDFromContext(r.Context())
 	planID, ok := pathIDParam(w, r, "id")

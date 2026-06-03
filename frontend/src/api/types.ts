@@ -229,12 +229,19 @@ export interface ChatMessage {
   created_at: string;
 }
 
-// A previewed mutation the user confirms. payload is shaped exactly like the
-// body of POST /api/products or POST /api/recipes.
-export interface ChatProposal {
-  type: "product" | "recipe";
-  payload: ProductInput | RecipeInput;
+export interface CopyDayPayload {
+  plan_id: number;
+  source_date: string;
+  target_dates: string[];
 }
+
+// A previewed mutation the user confirms. payload is shaped exactly like the
+// body of the matching endpoint (POST /api/products, /api/recipes, or
+// /api/meal-plans/{id}/copy-day).
+export type ChatProposal =
+  | { type: "product"; payload: ProductInput }
+  | { type: "recipe"; payload: RecipeInput }
+  | { type: "copy_day"; payload: CopyDayPayload };
 
 export interface ChatSendResponse {
   message: ChatMessage;

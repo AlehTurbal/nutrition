@@ -90,6 +90,7 @@ func (h *Handlers) Router() http.Handler {
 				r.Get("/{id}", h.getPlan)
 				r.Delete("/{id}", h.deletePlan)
 				r.Post("/{id}/items", h.addItem)
+				r.Post("/{id}/copy-day", h.copyDay)
 				r.Delete("/{id}/items/{itemID}", h.deleteItem)
 				r.Get("/{id}/shopping-list", h.shoppingList)
 			})

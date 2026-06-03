@@ -6,13 +6,10 @@ import {
   useDeleteThread,
   useSendMessage,
 } from "../../api/chat";
+import { useApplyCopyDay } from "../../api/plans";
 import { useCreateProduct } from "../../api/products";
 import { useCreateRecipe } from "../../api/recipes";
-import type {
-  ChatProposal,
-  ProductInput,
-  RecipeInput,
-} from "../../api/types";
+import type { ChatProposal } from "../../api/types";
 import { Button } from "../../components/ui";
 
 interface PendingProposal {
@@ -40,6 +37,7 @@ export default function ChatPanel() {
   const send = useSendMessage(activeId ?? 0);
   const createProduct = useCreateProduct();
   const createRecipe = useCreateRecipe();
+  const copyDay = useApplyCopyDay();
 
   const [input, setInput] = useState("");
   const [proposals, setProposals] = useState<PendingProposal[]>([]);
@@ -95,9 +93,11 @@ export default function ChatPanel() {
   async function applyProposal(p: PendingProposal) {
     try {
       if (p.proposal.type === "product") {
-        await createProduct.mutateAsync(p.proposal.payload as ProductInput);
+        await createProduct.mutateAsync(p.proposal.payload);
+      } else if (p.proposal.type === "recipe") {
+        await createRecipe.mutateAsync(p.proposal.payload);
       } else {
-        await createRecipe.mutateAsync(p.proposal.payload as RecipeInput);
+        await copyDay.mutateAsync(p.proposal.payload);
       }
       setProposals((ps) =>
         ps.map((x) => (x.key === p.key ? { ...x, applied: true } : x)),
@@ -254,15 +254,23 @@ function ProposalCard({
   onReject: () => void;
 }) {
   const { proposal, applied, error } = pending;
-  const name = (proposal.payload as { name?: string }).name ?? "—";
-  const label = proposal.type === "product" ? "Продукт" : "Рецепт";
+  const label =
+    proposal.type === "product"
+      ? "Продукт"
+      : proposal.type === "recipe"
+        ? "Рецепт"
+        : "Копирование дня";
+  const title =
+    proposal.type === "copy_day"
+      ? `${proposal.payload.source_date} → ${proposal.payload.target_dates.length} дн.`
+      : proposal.payload.name || "—";
 
   return (
     <div className="mr-6 rounded-lg border border-brand-200 bg-white px-3 py-2 text-sm">
       <div className="mb-1 text-xs font-medium text-brand-700">
         Предложение · {label}
       </div>
-      <div className="font-medium text-slate-800">{name}</div>
+      <div className="font-medium text-slate-800">{title}</div>
       {error && <div className="mt-1 text-xs text-red-600">{error}</div>}
       {applied ? (
         <div className="mt-1 text-xs text-green-600">✓ Применено</div>

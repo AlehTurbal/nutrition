@@ -1,5 +1,6 @@
 import { useState } from "react";
 import {
+  useCopyDay,
   useDeleteItem,
   useDeletePlan,
   usePlan,
@@ -80,6 +81,7 @@ export default function PlanGrid({ planId }: { planId: number }) {
   const delItem = useDeleteItem(planId);
   const delPlan = useDeletePlan();
   const [openCell, setOpenCell] = useState<string | null>(null);
+  const [copySource, setCopySource] = useState<string | null>(null);
 
   if (plan.isLoading) return <Spinner />;
   if (plan.isError) return <ErrorBox error={plan.error} />;
@@ -135,8 +137,26 @@ export default function PlanGrid({ planId }: { planId: number }) {
           <tbody>
             {days.map((day) => (
               <tr key={day} className="align-top">
-                <td className="border-b border-slate-100 p-2 font-medium text-slate-600 whitespace-nowrap">
-                  {shortDate(day)}
+                <td className="border-b border-slate-100 p-2 align-top whitespace-nowrap">
+                  <div className="font-medium text-slate-600">
+                    {shortDate(day)}
+                  </div>
+                  {copySource === day ? (
+                    <CopyDayPanel
+                      planId={planId}
+                      source={day}
+                      days={days}
+                      onDone={() => setCopySource(null)}
+                    />
+                  ) : (
+                    <button
+                      onClick={() => setCopySource(day)}
+                      title="Копировать день"
+                      className="mt-1 text-xs text-slate-400 hover:text-brand-500"
+                    >
+                      ⧉ копировать
+                    </button>
+                  )}
                 </td>
                 {slots.map((slot) => {
                   const cellKey = `${day}|${slot}`;
@@ -197,5 +217,79 @@ export default function PlanGrid({ planId }: { planId: number }) {
       </div>
       {delItem.isError && <div className="mt-3"><ErrorBox error={delItem.error} /></div>}
     </Card>
+  );
+}
+
+// CopyDayPanel copies one day's items onto a chosen day or the whole plan
+// ("Вся неделя"). Targets are replaced with a copy of the source day.
+function CopyDayPanel({
+  planId,
+  source,
+  days,
+  onDone,
+}: {
+  planId: number;
+  source: string;
+  days: string[];
+  onDone: () => void;
+}) {
+  const copy = useCopyDay(planId);
+  const others = days.filter((d) => d !== source);
+  const [target, setTarget] = useState<string>("all");
+
+  if (others.length === 0) {
+    return (
+      <div className="mt-1 text-xs text-slate-400">
+        нет других дней{" "}
+        <button onClick={onDone} className="text-brand-500">
+          ✕
+        </button>
+      </div>
+    );
+  }
+
+  const submit = () => {
+    const target_dates = target === "all" ? others : [target];
+    copy.mutate({ source_date: source, target_dates }, { onSuccess: onDone });
+  };
+
+  return (
+    <div className="mt-1 space-y-1 rounded border border-slate-200 p-1.5">
+      <select
+        value={target}
+        onChange={(e) => setTarget(e.target.value)}
+        className="w-full rounded border border-slate-300 px-1 py-1 text-xs"
+      >
+        <option value="all">Вся неделя</option>
+        {others.map((d) => (
+          <option key={d} value={d}>
+            {shortDate(d)}
+          </option>
+        ))}
+      </select>
+      <div className="flex items-center gap-1">
+        <Button
+          type="button"
+          onClick={submit}
+          disabled={copy.isPending}
+          className="px-2 py-0.5 text-xs"
+        >
+          ОК
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          onClick={onDone}
+          className="px-2 py-0.5 text-xs"
+        >
+          ✕
+        </Button>
+      </div>
+      {copy.isError && (
+        <div className="text-xs text-red-600">
+          {(copy.error as Error).message}
+        </div>
+      )}
+    </div>
   );
 }

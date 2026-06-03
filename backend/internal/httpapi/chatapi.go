@@ -8,6 +8,7 @@ import (
 	"github.com/alehturbal/nutrition/backend/internal/assistant"
 	"github.com/alehturbal/nutrition/backend/internal/auth"
 	"github.com/alehturbal/nutrition/backend/internal/chat"
+	"github.com/alehturbal/nutrition/backend/internal/mealplans"
 	"github.com/alehturbal/nutrition/backend/internal/nutrition"
 	"github.com/alehturbal/nutrition/backend/internal/products"
 	"github.com/alehturbal/nutrition/backend/internal/recipes"
@@ -17,14 +18,15 @@ import (
 // StoreData adapts the domain stores to assistant.DataSource, backing the
 // assistant's read tools with the user's real data.
 type StoreData struct {
-	users    *users.Store
-	products *products.Store
-	recipes  *recipes.Store
+	users     *users.Store
+	products  *products.Store
+	recipes   *recipes.Store
+	mealplans *mealplans.Store
 }
 
 // NewStoreData builds the assistant's read-tool data source.
-func NewStoreData(u *users.Store, p *products.Store, r *recipes.Store) *StoreData {
-	return &StoreData{users: u, products: p, recipes: r}
+func NewStoreData(u *users.Store, p *products.Store, r *recipes.Store, m *mealplans.Store) *StoreData {
+	return &StoreData{users: u, products: p, recipes: r, mealplans: m}
 }
 
 func (d *StoreData) ListProducts(ctx context.Context, userID int64) (any, error) {
@@ -33,6 +35,24 @@ func (d *StoreData) ListProducts(ctx context.Context, userID int64) (any, error)
 
 func (d *StoreData) ListRecipes(ctx context.Context, userID int64) (any, error) {
 	return d.recipes.List(ctx, userID)
+}
+
+// ListMealPlans returns the user's plans, each with its items, so the assistant
+// can resolve real plan ids and dates before proposing a day copy.
+func (d *StoreData) ListMealPlans(ctx context.Context, userID int64) (any, error) {
+	plans, err := d.mealplans.ListPlans(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]mealplans.Plan, 0, len(plans))
+	for _, p := range plans {
+		full, err := d.mealplans.GetPlan(ctx, userID, p.ID)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, full)
+	}
+	return out, nil
 }
 
 // GetTargets mirrors the /api/targets computation so the assistant sees the same

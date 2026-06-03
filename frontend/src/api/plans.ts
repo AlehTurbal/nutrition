@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "./client";
-import type { Plan, PlanItem, ShoppingList } from "./types";
+import type { CopyDayPayload, Plan, PlanItem, ShoppingList } from "./types";
 
 export function usePlans() {
   return useQuery({
@@ -46,6 +46,36 @@ export function useAddItem(planId: number) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["plan", planId] });
       qc.invalidateQueries({ queryKey: ["shopping", planId] });
+    },
+  });
+}
+
+export function useCopyDay(planId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { source_date: string; target_dates: string[] }) =>
+      api.post<PlanItem[]>(`/api/meal-plans/${planId}/copy-day`, input),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["plan", planId] });
+      qc.invalidateQueries({ queryKey: ["shopping", planId] });
+    },
+  });
+}
+
+// useApplyCopyDay applies a chat copy_day proposal, where the plan id travels in
+// the payload rather than being fixed by the calling screen.
+export function useApplyCopyDay() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: CopyDayPayload) =>
+      api.post<PlanItem[]>(`/api/meal-plans/${payload.plan_id}/copy-day`, {
+        source_date: payload.source_date,
+        target_dates: payload.target_dates,
+      }),
+    onSuccess: (_data, payload) => {
+      qc.invalidateQueries({ queryKey: ["plan", payload.plan_id] });
+      qc.invalidateQueries({ queryKey: ["shopping", payload.plan_id] });
+      qc.invalidateQueries({ queryKey: ["plans"] });
     },
   });
 }

@@ -56,6 +56,7 @@ func run() error {
 
 	productStore := products.NewStore(pool)
 	recipeStore := recipes.NewStore(pool)
+	mealPlanStore := mealplans.NewStore(pool)
 
 	handlers := &httpapi.Handlers{
 		Auth:         authSvc,
@@ -63,12 +64,12 @@ func run() error {
 		Tokens:       tokens,
 		Products:     productStore,
 		Recipes:      recipeStore,
-		MealPlans:    mealplans.NewStore(pool),
+		MealPlans:    mealPlanStore,
 		StoreMatcher: stores.NewService(llmClient),
 		StoreStore:   stores.NewStore(pool),
 		RecipeGen:    recipes.NewGenerator(llmClient),
 		Chat:         chat.NewStore(pool),
-		Assistant:    assistant.New(llmClient, httpapi.NewStoreData(store, productStore, recipeStore)),
+		Assistant:    assistant.New(llmClient, httpapi.NewStoreData(store, productStore, recipeStore, mealPlanStore)),
 	}
 
 	srv := &http.Server{

@@ -79,6 +79,84 @@ func TestMealPlanFlowAndShoppingList(t *testing.T) {
 	}
 }
 
+func TestCopyDayReplacesTargetDays(t *testing.T) {
+	srv := newServer(t)
+	token := registerUser(t, srv.URL, "copyday@example.com")
+
+	chicken := createProduct(t, srv.URL, token, "Курица", 165, 31, 3.6, 0)
+	rice := createProduct(t, srv.URL, token, "Рис", 130, 2.7, 0.3, 28)
+	_, out := doJSON(t, http.MethodPost, srv.URL+"/api/recipes", token, map[string]any{
+		"name": "Курица с рисом", "servings": 2,
+		"meal_types": []string{"lunch", "dinner"},
+		"ingredients": []map[string]any{
+			{"product_id": chicken, "grams": 200},
+			{"product_id": rice, "grams": 150},
+		},
+	})
+	recipeID := int64(out["recipe"].(map[string]any)["id"].(float64))
+
+	_, out = doJSON(t, http.MethodPost, srv.URL+"/api/meal-plans", token, map[string]any{
+		"name": "Неделя 1", "start_date": "2026-06-01", "end_date": "2026-06-07",
+	})
+	planID := int64(out["id"].(float64))
+	base := srv.URL + "/api/meal-plans/" + itoa(planID)
+
+	// Source day 06-01: lunch + dinner.
+	doJSON(t, http.MethodPost, base+"/items", token, map[string]any{
+		"day_date": "2026-06-01", "meal_slot": "lunch", "recipe_id": recipeID, "servings": 1,
+	})
+	doJSON(t, http.MethodPost, base+"/items", token, map[string]any{
+		"day_date": "2026-06-01", "meal_slot": "dinner", "recipe_id": recipeID, "servings": 2,
+	})
+	// 06-03 already has a breakfast item that must be replaced away.
+	doJSON(t, http.MethodPost, base+"/items", token, map[string]any{
+		"day_date": "2026-06-03", "meal_slot": "breakfast", "recipe_id": recipeID, "servings": 1,
+	})
+
+	// Copy 06-01 onto 06-02 and 06-03.
+	resp, _ := doJSON(t, http.MethodPost, base+"/copy-day", token, map[string]any{
+		"source_date":  "2026-06-01",
+		"target_dates": []string{"2026-06-02", "2026-06-03"},
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("copy-day: status %d", resp.StatusCode)
+	}
+
+	_, out = doJSON(t, http.MethodGet, base, token, nil)
+	bySlotByDay := map[string][]string{}
+	for _, raw := range out["items"].([]any) {
+		it := raw.(map[string]any)
+		day := it["day_date"].(string)
+		bySlotByDay[day] = append(bySlotByDay[day], it["meal_slot"].(string))
+	}
+	for _, day := range []string{"2026-06-01", "2026-06-02", "2026-06-03"} {
+		if len(bySlotByDay[day]) != 2 {
+			t.Errorf("%s: expected 2 items (lunch+dinner), got %v", day, bySlotByDay[day])
+		}
+	}
+	// The pre-existing breakfast on 06-03 must be gone (replace, not append).
+	for _, slot := range bySlotByDay["2026-06-03"] {
+		if slot == "breakfast" {
+			t.Errorf("06-03 still has the replaced breakfast item")
+		}
+	}
+}
+
+func TestCopyDayRejectsOutOfRange(t *testing.T) {
+	srv := newServer(t)
+	token := registerUser(t, srv.URL, "copyrange@example.com")
+	_, out := doJSON(t, http.MethodPost, srv.URL+"/api/meal-plans", token, map[string]any{
+		"name": "P", "start_date": "2026-06-01", "end_date": "2026-06-03",
+	})
+	planID := int64(out["id"].(float64))
+	resp, _ := doJSON(t, http.MethodPost, srv.URL+"/api/meal-plans/"+itoa(planID)+"/copy-day", token, map[string]any{
+		"source_date": "2026-06-01", "target_dates": []string{"2026-06-09"},
+	})
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400 for out-of-range target, got %d", resp.StatusCode)
+	}
+}
+
 func TestMealPlanRejectsForeignRecipe(t *testing.T) {
 	srv := newServer(t)
 	token := registerUser(t, srv.URL, "planowner@example.com")
