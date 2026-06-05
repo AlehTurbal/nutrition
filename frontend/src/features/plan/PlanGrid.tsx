@@ -175,8 +175,8 @@ export default function PlanGrid({ planId }: { planId: number }) {
                       <div className="space-y-1">
                         {cellItems.length > 0 && cellMacros && (
                           <div className="text-[11px] text-slate-400">
-                            {cellMacros.complete ? "" : "≈"}Б{fmt(cellMacros.protein)} Ж
-                            {fmt(cellMacros.fat)} У{fmt(cellMacros.carbs)}
+                            {cellMacros.complete ? "" : "≈"}Б:{fmt(cellMacros.protein)} Ж:
+                            {fmt(cellMacros.fat)} У:{fmt(cellMacros.carbs)}
                           </div>
                         )}
                         {cellItems.map((it) => (
