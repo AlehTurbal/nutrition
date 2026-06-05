@@ -171,11 +171,18 @@ export interface DayMacros {
   macros: Macros;
 }
 
+export interface CellMacros {
+  date: string;
+  slot: string;
+  macros: Macros;
+}
+
 export interface ShoppingList {
   items: ShoppingItem[];
   totals: Macros;
   by_slot: SlotMacros[];
   by_day: DayMacros[];
+  by_cell: CellMacros[];
 }
 
 export interface StoreMatchItem {

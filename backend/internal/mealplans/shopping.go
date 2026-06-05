@@ -29,12 +29,20 @@ type DayMacros struct {
 	Macros recipes.Macros `json:"macros"`
 }
 
+// CellMacros is the total БЖУ planned for one day × meal-slot cell.
+type CellMacros struct {
+	Date   Date           `json:"date"`
+	Slot   string         `json:"slot"`
+	Macros recipes.Macros `json:"macros"`
+}
+
 // ShoppingList is the derived buy-list plus macro roll-ups for a plan.
 type ShoppingList struct {
 	Items  []ShoppingItem `json:"items"`
 	Totals recipes.Macros `json:"totals"`
 	BySlot []SlotMacros   `json:"by_slot"`
 	ByDay  []DayMacros    `json:"by_day"`
+	ByCell []CellMacros   `json:"by_cell"`
 }
 
 // line is one ingredient occurrence scaled by the item's servings.
@@ -138,6 +146,9 @@ func buildShoppingList(lines []line) ShoppingList {
 	dayGrams := map[string][]recipes.IngredientMacro{}
 	dayDates := map[string]Date{}
 	dayOrder := []string{}
+	cellGrams := map[string][]recipes.IngredientMacro{}
+	cellInfo := map[string]CellMacros{}
+	cellOrder := []string{}
 
 	for _, l := range lines {
 		a, ok := byProduct[l.productID]
@@ -163,13 +174,22 @@ func buildShoppingList(lines []line) ShoppingList {
 		dayGrams[day] = append(dayGrams[day], recipes.IngredientMacro{
 			Grams: l.grams, Kcal100: l.kcal100, Protein100: l.protein100, Fat100: l.fat100, Carbs100: l.carbs100,
 		})
+
+		cellKey := day + "|" + l.slot
+		if _, ok := cellGrams[cellKey]; !ok {
+			cellOrder = append(cellOrder, cellKey)
+			cellInfo[cellKey] = CellMacros{Date: l.date, Slot: l.slot}
+		}
+		cellGrams[cellKey] = append(cellGrams[cellKey], recipes.IngredientMacro{
+			Grams: l.grams, Kcal100: l.kcal100, Protein100: l.protein100, Fat100: l.fat100, Carbs100: l.carbs100,
+		})
 	}
 
 	sort.Slice(order, func(i, j int) bool {
 		return byProduct[order[i]].name < byProduct[order[j]].name
 	})
 
-	out := ShoppingList{Items: []ShoppingItem{}, BySlot: []SlotMacros{}, ByDay: []DayMacros{}}
+	out := ShoppingList{Items: []ShoppingItem{}, BySlot: []SlotMacros{}, ByDay: []DayMacros{}, ByCell: []CellMacros{}}
 	var totalLines []recipes.IngredientMacro
 	for _, id := range order {
 		a := byProduct[id]
@@ -193,6 +213,15 @@ func buildShoppingList(lines []line) ShoppingList {
 	sort.Strings(dayOrder)
 	for _, day := range dayOrder {
 		out.ByDay = append(out.ByDay, DayMacros{Date: dayDates[day], Macros: recipes.ComputeMacros(dayGrams[day])})
+	}
+
+	// Keys are "YYYY-MM-DD|slot", so sorting strings orders by day chronologically,
+	// then by slot alphabetically within a day.
+	sort.Strings(cellOrder)
+	for _, key := range cellOrder {
+		c := cellInfo[key]
+		c.Macros = recipes.ComputeMacros(cellGrams[key])
+		out.ByCell = append(out.ByCell, c)
 	}
 	return out
 }

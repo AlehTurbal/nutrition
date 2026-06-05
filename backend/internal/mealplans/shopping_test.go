@@ -66,6 +66,28 @@ func TestBuildShoppingListAggregatesAndScales(t *testing.T) {
 	if sl.ByDay[1].Date.Format("2006-01-02") != "2026-06-02" || !eq(sl.ByDay[1].Macros.Kcal, 165) {
 		t.Errorf("day[1] wrong: %s %+v", sl.ByDay[1].Date.Format("2006-01-02"), sl.ByDay[1].Macros)
 	}
+
+	// Per-cell: 2026-06-01|breakfast (165), 2026-06-01|dinner (65),
+	// 2026-06-02|breakfast (165) — ordered by day then slot.
+	if len(sl.ByCell) != 3 {
+		t.Fatalf("expected 3 cells, got %d", len(sl.ByCell))
+	}
+	want := []struct {
+		date string
+		slot string
+		kcal float64
+	}{
+		{"2026-06-01", "breakfast", 165},
+		{"2026-06-01", "dinner", 65},
+		{"2026-06-02", "breakfast", 165},
+	}
+	for i, w := range want {
+		c := sl.ByCell[i]
+		if c.Date.Format("2006-01-02") != w.date || c.Slot != w.slot || !eq(c.Macros.Kcal, w.kcal) {
+			t.Errorf("cell[%d] = %s|%s %.2f, want %s|%s %.2f",
+				i, c.Date.Format("2006-01-02"), c.Slot, c.Macros.Kcal, w.date, w.slot, w.kcal)
+		}
+	}
 }
 
 func TestBuildShoppingListMarksIncomplete(t *testing.T) {
@@ -110,7 +132,7 @@ func TestBuildShoppingListMergesDirectProductLine(t *testing.T) {
 
 func TestBuildShoppingListEmpty(t *testing.T) {
 	sl := buildShoppingList(nil)
-	if len(sl.Items) != 0 || len(sl.BySlot) != 0 || len(sl.ByDay) != 0 {
+	if len(sl.Items) != 0 || len(sl.BySlot) != 0 || len(sl.ByDay) != 0 || len(sl.ByCell) != 0 {
 		t.Errorf("expected empty list, got %+v", sl)
 	}
 	if !sl.Totals.Complete {

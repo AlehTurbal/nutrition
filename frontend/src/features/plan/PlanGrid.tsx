@@ -100,6 +100,9 @@ export default function PlanGrid({ planId }: { planId: number }) {
   const plannedByDay = new Map(
     (shopping.data?.by_day ?? []).map((d) => [d.date, d.macros]),
   );
+  const plannedByCell = new Map(
+    (shopping.data?.by_cell ?? []).map((c) => [`${c.date}|${c.slot}`, c.macros]),
+  );
   const dayTarget = targets.data?.targets ?? null;
 
   return (
@@ -162,13 +165,21 @@ export default function PlanGrid({ planId }: { planId: number }) {
                 </td>
                 {slots.map((slot) => {
                   const cellKey = `${day}|${slot}`;
+                  const cellItems = itemsAt(day, slot);
+                  const cellMacros = plannedByCell.get(cellKey);
                   return (
                     <td
                       key={slot}
                       className="border-b border-l border-slate-100 p-2 align-top"
                     >
                       <div className="space-y-1">
-                        {itemsAt(day, slot).map((it) => (
+                        {cellItems.length > 0 && cellMacros && (
+                          <div className="text-[11px] text-slate-400">
+                            {cellMacros.complete ? "" : "≈"}Б{fmt(cellMacros.protein)} Ж
+                            {fmt(cellMacros.fat)} У{fmt(cellMacros.carbs)}
+                          </div>
+                        )}
+                        {cellItems.map((it) => (
                           <div key={it.id} className="relative">
                             <div className="group flex items-center justify-between gap-1 rounded bg-brand-50 px-2 py-1 text-xs text-brand-700">
                               <button
