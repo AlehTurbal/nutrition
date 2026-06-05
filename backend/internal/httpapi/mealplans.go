@@ -230,6 +230,55 @@ func withinPlan(p mealplans.Plan, d time.Time) bool {
 	return !d.Before(p.StartDate.Time) && !d.After(p.EndDate.Time)
 }
 
+type updateItemRequest struct {
+	Servings *float64 `json:"servings"`
+	Grams    *float64 `json:"grams"`
+}
+
+// updateItem changes the quantity of one plan item — servings for a recipe item
+// or grams for a product item. Exactly one positive value must be supplied.
+func (h *Handlers) updateItem(w http.ResponseWriter, r *http.Request) {
+	userID, _ := auth.UserIDFromContext(r.Context())
+	planID, ok := pathIDParam(w, r, "id")
+	if !ok {
+		return
+	}
+	itemID, ok := pathIDParam(w, r, "itemID")
+	if !ok {
+		return
+	}
+	var req updateItemRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	if (req.Servings == nil) == (req.Grams == nil) {
+		writeError(w, http.StatusBadRequest, "exactly one of servings or grams is required")
+		return
+	}
+	if req.Servings != nil && *req.Servings <= 0 {
+		writeError(w, http.StatusBadRequest, "servings must be positive")
+		return
+	}
+	if req.Grams != nil && *req.Grams <= 0 {
+		writeError(w, http.StatusBadRequest, "grams must be positive")
+		return
+	}
+
+	it, err := h.MealPlans.UpdateItem(r.Context(), userID, planID, itemID, req.Servings, req.Grams)
+	switch {
+	case errors.Is(err, mealplans.ErrNotFound):
+		writeError(w, http.StatusNotFound, "item not found")
+	case errors.Is(err, mealplans.ErrInvalidProduct):
+		writeError(w, http.StatusBadRequest, "grams can only be set on a product item")
+	case errors.Is(err, mealplans.ErrInvalidRecipe):
+		writeError(w, http.StatusBadRequest, "servings can only be set on a recipe item")
+	case err != nil:
+		writeError(w, http.StatusInternalServerError, "could not update item")
+	default:
+		writeJSON(w, http.StatusOK, it)
+	}
+}
+
 func (h *Handlers) deleteItem(w http.ResponseWriter, r *http.Request) {
 	userID, _ := auth.UserIDFromContext(r.Context())
 	planID, ok := pathIDParam(w, r, "id")

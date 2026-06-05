@@ -368,6 +368,86 @@ func (s *Store) CopyDay(ctx context.Context, userID, planID int64, source Date, 
 	return out, nil
 }
 
+// UpdateItem changes the quantity of one item in a plan owned by the user:
+// servings for a recipe item or grams for a product item. Exactly one of
+// servings/grams is applied, matching the item's kind. Returns the refreshed
+// item (with joined recipe/product name). ErrNotFound if the item is missing or
+// not owned by the user.
+func (s *Store) UpdateItem(ctx context.Context, userID, planID, itemID int64, servings, grams *float64) (Item, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return Item{}, err
+	}
+	defer tx.Rollback(ctx)
+
+	// Load the item, scoped to the user's plan, to learn its kind.
+	var it Item
+	var curServings float64
+	var productID *int64
+	err = tx.QueryRow(ctx,
+		`SELECT mpi.id, mpi.product_id, mpi.servings
+		 FROM meal_plan_items mpi
+		 JOIN meal_plans mp ON mp.id = mpi.meal_plan_id
+		 WHERE mpi.id = $1 AND mpi.meal_plan_id = $2 AND mp.user_id = $3`,
+		itemID, planID, userID).Scan(&it.ID, &productID, &curServings)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Item{}, ErrNotFound
+	}
+	if err != nil {
+		return Item{}, fmt.Errorf("load item: %w", err)
+	}
+
+	if productID != nil {
+		if grams == nil {
+			return Item{}, ErrInvalidProduct
+		}
+		if _, err := tx.Exec(ctx,
+			`UPDATE meal_plan_items SET grams = $1 WHERE id = $2`, *grams, itemID); err != nil {
+			return Item{}, fmt.Errorf("update grams: %w", err)
+		}
+	} else {
+		if servings == nil {
+			return Item{}, ErrInvalidRecipe
+		}
+		if _, err := tx.Exec(ctx,
+			`UPDATE meal_plan_items SET servings = $1 WHERE id = $2`, *servings, itemID); err != nil {
+			return Item{}, fmt.Errorf("update servings: %w", err)
+		}
+	}
+
+	// Re-select the full row with joined names.
+	var recipeID *int64
+	var recipeName, productName *string
+	err = tx.QueryRow(ctx,
+		`SELECT mpi.id, mpi.meal_plan_id, mpi.day_date, mpi.meal_slot,
+		        mpi.recipe_id, r.name, mpi.servings,
+		        mpi.product_id, p.name, mpi.grams
+		 FROM meal_plan_items mpi
+		 LEFT JOIN recipes  r ON r.id = mpi.recipe_id
+		 LEFT JOIN products p ON p.id = mpi.product_id
+		 WHERE mpi.id = $1`, itemID).Scan(
+		&it.ID, &it.MealPlanID, &it.DayDate.Time, &it.MealSlot,
+		&recipeID, &recipeName, &it.Servings,
+		&it.ProductID, &productName, &it.Grams)
+	if err != nil {
+		return Item{}, fmt.Errorf("reload item: %w", err)
+	}
+	if recipeID != nil {
+		it.RecipeID = *recipeID
+	}
+	if recipeName != nil {
+		it.RecipeName = *recipeName
+	}
+	if productName != nil {
+		it.ProductName = *productName
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return Item{}, err
+	}
+	return it, nil
+}
+
 // DeleteItem removes one item from a plan owned by the user. ErrNotFound if missing.
 func (s *Store) DeleteItem(ctx context.Context, userID, planID, itemID int64) error {
 	tag, err := s.pool.Exec(ctx,

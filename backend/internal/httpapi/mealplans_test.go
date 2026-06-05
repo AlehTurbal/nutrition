@@ -225,6 +225,101 @@ func TestAddProductItemToPlan(t *testing.T) {
 	}
 }
 
+func TestUpdateItemQuantity(t *testing.T) {
+	srv := newServer(t)
+	token := registerUser(t, srv.URL, "updateitem@example.com")
+
+	chicken := createProduct(t, srv.URL, token, "Курица", 165, 31, 3.6, 0)
+	rice := createProduct(t, srv.URL, token, "Рис", 130, 2.7, 0.3, 28)
+	_, out := doJSON(t, http.MethodPost, srv.URL+"/api/recipes", token, map[string]any{
+		"name": "Курица с рисом", "servings": 2,
+		"meal_types": []string{"lunch"},
+		"ingredients": []map[string]any{
+			{"product_id": chicken, "grams": 200},
+			{"product_id": rice, "grams": 150},
+		},
+	})
+	recipeID := int64(out["recipe"].(map[string]any)["id"].(float64))
+
+	_, out = doJSON(t, http.MethodPost, srv.URL+"/api/meal-plans", token, map[string]any{
+		"name": "P", "start_date": "2026-06-01", "end_date": "2026-06-02",
+	})
+	planID := int64(out["id"].(float64))
+	base := srv.URL + "/api/meal-plans/" + itoa(planID)
+
+	// A product item (150g chicken) and a recipe item (1 serving).
+	_, prod := doJSON(t, http.MethodPost, base+"/items", token, map[string]any{
+		"day_date": "2026-06-01", "meal_slot": "lunch", "product_id": chicken, "grams": 150,
+	})
+	productItemID := int64(prod["id"].(float64))
+	_, rec := doJSON(t, http.MethodPost, base+"/items", token, map[string]any{
+		"day_date": "2026-06-01", "meal_slot": "dinner", "recipe_id": recipeID, "servings": 1,
+	})
+	recipeItemID := int64(rec["id"].(float64))
+
+	// Update product grams 150 -> 250.
+	resp, updated := doJSON(t, http.MethodPatch, base+"/items/"+itoa(productItemID), token, map[string]any{
+		"grams": 250,
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("update grams: status %d, body %v", resp.StatusCode, updated)
+	}
+	approxEq(t, "updated grams", updated["grams"].(float64), 250)
+	if updated["product_name"].(string) != "Курица" {
+		t.Errorf("product_name = %v, want Курица", updated["product_name"])
+	}
+
+	// Update recipe servings 1 -> 3.
+	resp, updated = doJSON(t, http.MethodPatch, base+"/items/"+itoa(recipeItemID), token, map[string]any{
+		"servings": 3,
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("update servings: status %d, body %v", resp.StatusCode, updated)
+	}
+	approxEq(t, "updated servings", updated["servings"].(float64), 3)
+
+	// Shopping list reflects the new quantities: 250g chicken (product) +
+	// recipe at 3/2 of (200g chicken + 150g rice) = 300g chicken + 225g rice.
+	// Chicken total = 250 + 300 = 550g; rice = 225g.
+	_, out = doJSON(t, http.MethodGet, base+"/shopping-list", token, nil)
+	byName := map[string]float64{}
+	for _, it := range out["items"].([]any) {
+		m := it.(map[string]any)
+		byName[m["product_name"].(string)] = m["grams"].(float64)
+	}
+	approxEq(t, "chicken grams", byName["Курица"], 550)
+	approxEq(t, "rice grams", byName["Рис"], 225)
+
+	// Rejections: wrong-kind field, non-positive, both fields, neither field.
+	resp, _ = doJSON(t, http.MethodPatch, base+"/items/"+itoa(productItemID), token, map[string]any{"servings": 2})
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("servings on product item: expected 400, got %d", resp.StatusCode)
+	}
+	resp, _ = doJSON(t, http.MethodPatch, base+"/items/"+itoa(recipeItemID), token, map[string]any{"grams": 100})
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("grams on recipe item: expected 400, got %d", resp.StatusCode)
+	}
+	resp, _ = doJSON(t, http.MethodPatch, base+"/items/"+itoa(productItemID), token, map[string]any{"grams": 0})
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("non-positive grams: expected 400, got %d", resp.StatusCode)
+	}
+	resp, _ = doJSON(t, http.MethodPatch, base+"/items/"+itoa(productItemID), token, map[string]any{"grams": 100, "servings": 2})
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("both fields: expected 400, got %d", resp.StatusCode)
+	}
+	resp, _ = doJSON(t, http.MethodPatch, base+"/items/"+itoa(productItemID), token, map[string]any{})
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("neither field: expected 400, got %d", resp.StatusCode)
+	}
+
+	// Another user cannot update this item (404).
+	other := registerUser(t, srv.URL, "updateitem-other@example.com")
+	resp, _ = doJSON(t, http.MethodPatch, base+"/items/"+itoa(productItemID), other, map[string]any{"grams": 200})
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("foreign user update: expected 404, got %d", resp.StatusCode)
+	}
+}
+
 func TestTargetsIncludePerMealSplit(t *testing.T) {
 	srv := newServer(t)
 	token := registerUser(t, srv.URL, "splituser@example.com")

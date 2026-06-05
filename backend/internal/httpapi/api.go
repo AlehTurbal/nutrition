@@ -91,6 +91,7 @@ func (h *Handlers) Router() http.Handler {
 				r.Delete("/{id}", h.deletePlan)
 				r.Post("/{id}/items", h.addItem)
 				r.Post("/{id}/copy-day", h.copyDay)
+				r.Patch("/{id}/items/{itemID}", h.updateItem)
 				r.Delete("/{id}/items/{itemID}", h.deleteItem)
 				r.Get("/{id}/shopping-list", h.shoppingList)
 			})

@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   useCopyDay,
   useDeleteItem,
   useDeletePlan,
   usePlan,
   useShoppingList,
+  useUpdateItem,
 } from "../../api/plans";
 import { useProfile, useTargets } from "../../api/profile";
 import { useRecipes } from "../../api/recipes";
@@ -82,6 +83,7 @@ export default function PlanGrid({ planId }: { planId: number }) {
   const delPlan = useDeletePlan();
   const [openCell, setOpenCell] = useState<string | null>(null);
   const [copySource, setCopySource] = useState<string | null>(null);
+  const [editingItem, setEditingItem] = useState<number | null>(null);
 
   if (plan.isLoading) return <Spinner />;
   if (plan.isError) return <ErrorBox error={plan.error} />;
@@ -167,21 +169,36 @@ export default function PlanGrid({ planId }: { planId: number }) {
                     >
                       <div className="space-y-1">
                         {itemsAt(day, slot).map((it) => (
-                          <div
-                            key={it.id}
-                            className="group flex items-center justify-between gap-1 rounded bg-brand-50 px-2 py-1 text-xs text-brand-700"
-                          >
-                            <span>
-                              {it.product_id != null
-                                ? `${it.product_name} ${fmt(it.grams ?? 0)} г`
-                                : `${it.recipe_name}${it.servings !== 1 ? ` ×${it.servings}` : ""}`}
-                            </span>
-                            <button
-                              onClick={() => delItem.mutate(it.id)}
-                              className="text-brand-400 opacity-0 group-hover:opacity-100"
-                            >
-                              ✕
-                            </button>
+                          <div key={it.id} className="relative">
+                            <div className="group flex items-center justify-between gap-1 rounded bg-brand-50 px-2 py-1 text-xs text-brand-700">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setEditingItem(
+                                    editingItem === it.id ? null : it.id,
+                                  )
+                                }
+                                title="Изменить количество"
+                                className="flex-1 text-left hover:underline"
+                              >
+                                {it.product_id != null
+                                  ? `${it.product_name} ${fmt(it.grams ?? 0)} г`
+                                  : `${it.recipe_name}${it.servings !== 1 ? ` ×${it.servings}` : ""}`}
+                              </button>
+                              <button
+                                onClick={() => delItem.mutate(it.id)}
+                                className="text-brand-400 opacity-0 group-hover:opacity-100"
+                              >
+                                ✕
+                              </button>
+                            </div>
+                            {editingItem === it.id && (
+                              <EditQtyPopover
+                                planId={planId}
+                                item={it}
+                                onDone={() => setEditingItem(null)}
+                              />
+                            )}
                           </div>
                         ))}
 
@@ -218,6 +235,90 @@ export default function PlanGrid({ planId }: { planId: number }) {
       </div>
       {delItem.isError && <div className="mt-3"><ErrorBox error={delItem.error} /></div>}
     </Card>
+  );
+}
+
+// EditQtyPopover is a small floating editor anchored to a plan item. It edits
+// grams for a product item or servings (порции) for a recipe item, then saves
+// via PATCH. Clicking outside or ✕ closes without saving.
+function EditQtyPopover({
+  planId,
+  item,
+  onDone,
+}: {
+  planId: number;
+  item: PlanItem;
+  onDone: () => void;
+}) {
+  const update = useUpdateItem(planId);
+  const isProduct = item.product_id != null;
+  const [value, setValue] = useState<number>(
+    isProduct ? (item.grams ?? 0) : item.servings,
+  );
+  const ref = useRef<HTMLDivElement>(null);
+
+  // Close on outside click.
+  useEffect(() => {
+    const onClick = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) onDone();
+    };
+    document.addEventListener("mousedown", onClick);
+    return () => document.removeEventListener("mousedown", onClick);
+  }, [onDone]);
+
+  const save = () => {
+    if (value <= 0) return;
+    update.mutate(
+      isProduct ? { itemId: item.id, grams: value } : { itemId: item.id, servings: value },
+      { onSuccess: onDone },
+    );
+  };
+
+  return (
+    <div
+      ref={ref}
+      className="absolute left-0 top-full z-10 mt-1 w-40 space-y-1 rounded border border-slate-200 bg-white p-2 shadow-lg"
+    >
+      <div className="text-xs text-slate-500">
+        {isProduct ? item.product_name : item.recipe_name}
+      </div>
+      <div className="flex items-center gap-1">
+        <input
+          type="number"
+          autoFocus
+          min={isProduct ? 1 : 0.5}
+          step={isProduct ? 10 : 0.5}
+          value={value}
+          onChange={(e) => setValue(Number(e.target.value))}
+          onKeyDown={(e) => e.key === "Enter" && save()}
+          className="w-16 rounded border border-slate-300 px-1 py-1 text-xs"
+        />
+        <span className="text-xs text-slate-400">{isProduct ? "г" : "порц."}</span>
+      </div>
+      <div className="flex items-center gap-1">
+        <Button
+          type="button"
+          onClick={save}
+          disabled={update.isPending || value <= 0}
+          className="px-2 py-0.5 text-xs"
+        >
+          Сохранить
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          onClick={onDone}
+          className="px-2 py-0.5 text-xs"
+        >
+          ✕
+        </Button>
+      </div>
+      {update.isError && (
+        <div className="text-xs text-red-600">
+          {(update.error as Error).message}
+        </div>
+      )}
+    </div>
   );
 }
 

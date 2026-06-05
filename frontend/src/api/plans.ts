@@ -106,6 +106,23 @@ export function useApplyAddToPlan() {
   });
 }
 
+// useUpdateItem changes the quantity of one plan item — servings for a recipe
+// item or grams for a product item (exactly one is sent).
+export function useUpdateItem(planId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { itemId: number; servings?: number; grams?: number }) =>
+      api.patch<PlanItem>(`/api/meal-plans/${planId}/items/${input.itemId}`, {
+        servings: input.servings,
+        grams: input.grams,
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["plan", planId] });
+      qc.invalidateQueries({ queryKey: ["shopping", planId] });
+    },
+  });
+}
+
 export function useDeleteItem(planId: number) {
   const qc = useQueryClient();
   return useMutation({
