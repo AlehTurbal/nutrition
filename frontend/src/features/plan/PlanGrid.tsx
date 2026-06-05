@@ -172,8 +172,9 @@ export default function PlanGrid({ planId }: { planId: number }) {
                             className="group flex items-center justify-between gap-1 rounded bg-brand-50 px-2 py-1 text-xs text-brand-700"
                           >
                             <span>
-                              {it.recipe_name}
-                              {it.servings !== 1 && ` ×${it.servings}`}
+                              {it.product_id != null
+                                ? `${it.product_name} ${fmt(it.grams ?? 0)} г`
+                                : `${it.recipe_name}${it.servings !== 1 ? ` ×${it.servings}` : ""}`}
                             </span>
                             <button
                               onClick={() => delItem.mutate(it.id)}

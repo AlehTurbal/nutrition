@@ -58,6 +58,25 @@ func (s *Store) CreateThread(ctx context.Context, userID int64, title string) (T
 	return t, nil
 }
 
+// UpdateThread renames one of the user's threads. Returns ErrNotFound if the
+// thread is missing or not owned by the user.
+func (s *Store) UpdateThread(ctx context.Context, userID, id int64, title string) (Thread, error) {
+	var t Thread
+	err := s.pool.QueryRow(ctx,
+		`UPDATE chat_threads SET title = $1
+		 WHERE id = $2 AND user_id = $3
+		 RETURNING id, user_id, title, created_at`,
+		title, id, userID,
+	).Scan(&t.ID, &t.UserID, &t.Title, &t.CreatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Thread{}, ErrNotFound
+	}
+	if err != nil {
+		return Thread{}, fmt.Errorf("update thread: %w", err)
+	}
+	return t, nil
+}
+
 // ListThreads returns the user's threads, newest first.
 func (s *Store) ListThreads(ctx context.Context, userID int64) ([]Thread, error) {
 	rows, err := s.pool.Query(ctx,

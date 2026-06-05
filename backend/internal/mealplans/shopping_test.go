@@ -81,6 +81,33 @@ func TestBuildShoppingListMarksIncomplete(t *testing.T) {
 	}
 }
 
+// A raw product placed directly into a plan cell (no recipe scaling) merges by
+// product id with any recipe-derived need for the same product.
+func TestBuildShoppingListMergesDirectProductLine(t *testing.T) {
+	chickenKcal := ptr(165.0)
+	d := mkDate("2026-06-01")
+	lines := []line{
+		// Recipe-derived chicken need.
+		{slot: "lunch", date: d, productID: 1, name: "Chicken", grams: 100, kcal100: chickenKcal, protein100: ptr(31), fat100: ptr(3.6), carbs100: ptr(0)},
+		// Direct product line for the same chicken, plus a product-only rice line.
+		{slot: "dinner", date: d, productID: 1, name: "Chicken", grams: 150, kcal100: chickenKcal, protein100: ptr(31), fat100: ptr(3.6), carbs100: ptr(0)},
+		{slot: "dinner", date: d, productID: 2, name: "Rice", grams: 50, kcal100: ptr(130), protein100: ptr(2.7), fat100: ptr(0.3), carbs100: ptr(28)},
+	}
+
+	sl := buildShoppingList(lines)
+
+	if len(sl.Items) != 2 {
+		t.Fatalf("expected 2 products, got %d", len(sl.Items))
+	}
+	if sl.Items[0].ProductName != "Chicken" || !eq(sl.Items[0].Grams, 250) {
+		t.Errorf("chicken should merge to 250g, got %+v", sl.Items[0])
+	}
+	// Totals: chicken 250g (412.5 kcal) + rice 50g (65 kcal) = 477.5.
+	if !eq(sl.Totals.Kcal, 477.5) {
+		t.Errorf("total kcal = %.2f, want 477.5", sl.Totals.Kcal)
+	}
+}
+
 func TestBuildShoppingListEmpty(t *testing.T) {
 	sl := buildShoppingList(nil)
 	if len(sl.Items) != 0 || len(sl.BySlot) != 0 || len(sl.ByDay) != 0 {

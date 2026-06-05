@@ -92,6 +92,31 @@ func (s *Store) ShoppingList(ctx context.Context, userID, planID int64) (Shoppin
 		return ShoppingList{}, err
 	}
 
+	// Raw products placed directly into plan cells contribute their grams as-is
+	// (no recipe-servings scaling). They aggregate by product alongside the
+	// recipe-derived needs above.
+	prows, err := s.pool.Query(ctx,
+		`SELECT mpi.meal_slot, mpi.day_date, mpi.product_id, p.name, mpi.grams,
+		        p.kcal100, p.protein100, p.fat100, p.carbs100
+		 FROM meal_plan_items mpi
+		 JOIN products p ON p.id = mpi.product_id
+		 WHERE mpi.meal_plan_id = $1 AND mpi.product_id IS NOT NULL`, planID)
+	if err != nil {
+		return ShoppingList{}, fmt.Errorf("aggregate product items: %w", err)
+	}
+	defer prows.Close()
+	for prows.Next() {
+		var l line
+		if err := prows.Scan(&l.slot, &l.date.Time, &l.productID, &l.name, &l.grams,
+			&l.kcal100, &l.protein100, &l.fat100, &l.carbs100); err != nil {
+			return ShoppingList{}, fmt.Errorf("scan product line: %w", err)
+		}
+		lines = append(lines, l)
+	}
+	if err := prows.Err(); err != nil {
+		return ShoppingList{}, err
+	}
+
 	return buildShoppingList(lines), nil
 }
 

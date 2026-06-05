@@ -138,6 +138,10 @@ export interface PlanItem {
   recipe_id: number;
   recipe_name: string;
   servings: number;
+  // Set instead of the recipe fields when the cell holds a raw product.
+  product_id?: number;
+  product_name?: string;
+  grams?: number;
 }
 
 export interface Plan {
@@ -235,13 +239,22 @@ export interface CopyDayPayload {
   target_dates: string[];
 }
 
+export interface AddToPlanPayload {
+  plan_id: number;
+  day_date: string;
+  meal_slot: string;
+  product_id: number;
+  grams: number;
+}
+
 // A previewed mutation the user confirms. payload is shaped exactly like the
-// body of the matching endpoint (POST /api/products, /api/recipes, or
-// /api/meal-plans/{id}/copy-day).
+// body of the matching endpoint (POST /api/products, /api/recipes,
+// /api/meal-plans/{id}/copy-day, or /api/meal-plans/{id}/items).
 export type ChatProposal =
-  | { type: "product"; payload: ProductInput }
+  | { type: "product"; payload: ProductInput & { product_id?: number } }
   | { type: "recipe"; payload: RecipeInput }
-  | { type: "copy_day"; payload: CopyDayPayload };
+  | { type: "copy_day"; payload: CopyDayPayload }
+  | { type: "add_to_plan"; payload: AddToPlanPayload };
 
 export interface ChatSendResponse {
   message: ChatMessage;

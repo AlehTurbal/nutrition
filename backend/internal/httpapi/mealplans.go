@@ -101,10 +101,12 @@ func (h *Handlers) deletePlan(w http.ResponseWriter, r *http.Request) {
 }
 
 type itemRequest struct {
-	DayDate  string  `json:"day_date"`
-	MealSlot string  `json:"meal_slot"`
-	RecipeID int64   `json:"recipe_id"`
-	Servings float64 `json:"servings"`
+	DayDate   string   `json:"day_date"`
+	MealSlot  string   `json:"meal_slot"`
+	RecipeID  int64    `json:"recipe_id"`
+	Servings  float64  `json:"servings"`
+	ProductID *int64   `json:"product_id"`
+	Grams     *float64 `json:"grams"`
 }
 
 func (h *Handlers) addItem(w http.ResponseWriter, r *http.Request) {
@@ -125,18 +127,32 @@ func (h *Handlers) addItem(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "meal_slot is required")
 		return
 	}
+	hasProduct := req.ProductID != nil
+	hasRecipe := req.RecipeID != 0
+	if hasProduct == hasRecipe {
+		writeError(w, http.StatusBadRequest, "exactly one of recipe_id or product_id is required")
+		return
+	}
+	if hasProduct && (req.Grams == nil || *req.Grams <= 0) {
+		writeError(w, http.StatusBadRequest, "grams must be positive for a product item")
+		return
+	}
 	it, err := h.MealPlans.AddItem(r.Context(), userID, mealplans.Item{
 		MealPlanID: planID,
 		DayDate:    mealplans.Date{Time: day},
 		MealSlot:   req.MealSlot,
 		RecipeID:   req.RecipeID,
 		Servings:   req.Servings,
+		ProductID:  req.ProductID,
+		Grams:      req.Grams,
 	})
 	switch {
 	case errors.Is(err, mealplans.ErrNotFound):
 		writeError(w, http.StatusNotFound, "plan not found")
 	case errors.Is(err, mealplans.ErrInvalidRecipe):
 		writeError(w, http.StatusBadRequest, "recipe not found")
+	case errors.Is(err, mealplans.ErrInvalidProduct):
+		writeError(w, http.StatusBadRequest, "product not found")
 	case err != nil:
 		writeError(w, http.StatusInternalServerError, "could not add item")
 	default:

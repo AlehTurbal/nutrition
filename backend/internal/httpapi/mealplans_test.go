@@ -174,6 +174,57 @@ func TestMealPlanRejectsForeignRecipe(t *testing.T) {
 	}
 }
 
+func TestAddProductItemToPlan(t *testing.T) {
+	srv := newServer(t)
+	token := registerUser(t, srv.URL, "productplanner@example.com")
+
+	chicken := createProduct(t, srv.URL, token, "Курица", 165, 31, 3.6, 0)
+
+	_, out := doJSON(t, http.MethodPost, srv.URL+"/api/meal-plans", token, map[string]any{
+		"name": "P", "start_date": "2026-06-01", "end_date": "2026-06-02",
+	})
+	planID := int64(out["id"].(float64))
+	items := srv.URL + "/api/meal-plans/" + itoa(planID) + "/items"
+
+	// Add a raw product (150g chicken) directly into a lunch cell.
+	resp, item := doJSON(t, http.MethodPost, items, token, map[string]any{
+		"day_date": "2026-06-01", "meal_slot": "lunch", "product_id": chicken, "grams": 150,
+	})
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("add product item: status %d, body %v", resp.StatusCode, item)
+	}
+	if item["product_name"].(string) != "Курица" {
+		t.Errorf("product_name = %v, want Курица", item["product_name"])
+	}
+	approxEq(t, "item grams", item["grams"].(float64), 150)
+
+	// Shopping list includes the product with its grams + kcal (165 * 1.5 = 247.5).
+	resp, out = doJSON(t, http.MethodGet, srv.URL+"/api/meal-plans/"+itoa(planID)+"/shopping-list", token, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("shopping list: status %d, body %v", resp.StatusCode, out)
+	}
+	list := out["items"].([]any)
+	if len(list) != 1 {
+		t.Fatalf("expected 1 product, got %d", len(list))
+	}
+	approxEq(t, "chicken grams", list[0].(map[string]any)["grams"].(float64), 150)
+	approxEq(t, "total kcal", out["totals"].(map[string]any)["kcal"].(float64), 247.5)
+
+	// Rejections: both ids, and a foreign product id.
+	resp, _ = doJSON(t, http.MethodPost, items, token, map[string]any{
+		"day_date": "2026-06-01", "meal_slot": "lunch", "recipe_id": 1, "product_id": chicken, "grams": 100,
+	})
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400 when both recipe_id and product_id set, got %d", resp.StatusCode)
+	}
+	resp, _ = doJSON(t, http.MethodPost, items, token, map[string]any{
+		"day_date": "2026-06-01", "meal_slot": "lunch", "product_id": 999999, "grams": 100,
+	})
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400 for unknown product, got %d", resp.StatusCode)
+	}
+}
+
 func TestTargetsIncludePerMealSplit(t *testing.T) {
 	srv := newServer(t)
 	token := registerUser(t, srv.URL, "splituser@example.com")

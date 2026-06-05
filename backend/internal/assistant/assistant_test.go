@@ -152,6 +152,9 @@ func TestParseProposal(t *testing.T) {
 		{"copy day", toolProposeCopyDay, `{"plan_id":1,"source_date":"2026-06-01","target_dates":["2026-06-02"]}`, "copy_day", false},
 		{"copy day no targets", toolProposeCopyDay, `{"plan_id":1,"source_date":"2026-06-01","target_dates":[]}`, "", true},
 		{"copy day no source", toolProposeCopyDay, `{"plan_id":1,"target_dates":["2026-06-02"]}`, "", true},
+		{"add to plan", toolProposeAddToPlan, `{"plan_id":1,"day_date":"2026-06-01","meal_slot":"lunch","product_id":7,"grams":150}`, "add_to_plan", false},
+		{"add to plan no grams", toolProposeAddToPlan, `{"plan_id":1,"day_date":"2026-06-01","meal_slot":"lunch","product_id":7}`, "", true},
+		{"add to plan no product", toolProposeAddToPlan, `{"plan_id":1,"day_date":"2026-06-01","meal_slot":"lunch","grams":150}`, "", true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -169,5 +172,21 @@ func TestParseProposal(t *testing.T) {
 				t.Errorf("type = %q, want %q", p.Type, tt.wantTyp)
 			}
 		})
+	}
+}
+
+// A product proposal carrying product_id means "update this existing product",
+// not "create a new one"; the id must survive into the payload so the UI can
+// PUT it instead of POSTing a duplicate.
+func TestParseProposalProductUpdateKeepsID(t *testing.T) {
+	p, err := parseProposal(toolProposeProduct, json.RawMessage(`{"product_id":42,"name":"Молоко","kcal100":60}`))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if p.Type != "product" {
+		t.Fatalf("type = %q, want product", p.Type)
+	}
+	if got, ok := p.Payload["product_id"]; !ok || got != float64(42) {
+		t.Errorf("payload product_id = %v (ok=%v), want 42", got, ok)
 	}
 }

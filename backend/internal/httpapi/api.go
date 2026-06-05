@@ -102,6 +102,7 @@ func (h *Handlers) Router() http.Handler {
 			r.Route("/chat/threads", func(r chi.Router) {
 				r.Get("/", h.listThreads)
 				r.Post("/", h.createThread)
+				r.Put("/{id}", h.renameThread)
 				r.Delete("/{id}", h.deleteThread)
 				r.Get("/{id}/messages", h.listMessages)
 				r.Post("/{id}/messages", h.postMessage)

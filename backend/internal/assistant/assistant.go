@@ -27,10 +27,10 @@ type Turn struct {
 }
 
 // Proposal is a previewed mutation the user confirms. Payload is shaped exactly
-// like the body of the matching CRUD endpoint (POST /api/products or
-// /api/recipes).
+// like the body of the matching CRUD endpoint (POST /api/products, /api/recipes,
+// /api/meal-plans/{id}/copy-day, or /api/meal-plans/{id}/items).
 type Proposal struct {
-	Type    string         `json:"type"` // "product" | "recipe"
+	Type    string         `json:"type"` // "product" | "recipe" | "copy_day" | "add_to_plan"
 	Payload map[string]any `json:"payload"`
 }
 
@@ -96,7 +96,7 @@ func (a *Assistant) Reply(ctx context.Context, userID int64, history []Turn, use
 					ToolUseID: b.ID,
 					Content:   a.runRead(ctx, userID, b.Name),
 				})
-			case toolProposeProduct, toolProposeRecipe, toolProposeCopyDay:
+			case toolProposeProduct, toolProposeRecipe, toolProposeCopyDay, toolProposeAddToPlan:
 				p, err := parseProposal(b.Name, b.Input)
 				if err != nil {
 					results = append(results, toolErr(b.ID, err))

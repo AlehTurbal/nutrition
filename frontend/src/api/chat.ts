@@ -18,6 +18,15 @@ export function useCreateThread() {
   });
 }
 
+export function useUpdateThread() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, title }: { id: number; title: string }) =>
+      api.put<ChatThread>(`/api/chat/threads/${id}`, { title }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["chat", "threads"] }),
+  });
+}
+
 export function useDeleteThread() {
   const qc = useQueryClient();
   return useMutation({
@@ -43,7 +52,10 @@ export function useSendMessage(threadId: number) {
         `/api/chat/threads/${threadId}/messages`,
         { content },
       ),
-    onSuccess: () =>
-      qc.invalidateQueries({ queryKey: ["chat", "messages", threadId] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["chat", "messages", threadId] });
+      // The first message auto-names the thread server-side; refresh the list.
+      qc.invalidateQueries({ queryKey: ["chat", "threads"] });
+    },
   });
 }

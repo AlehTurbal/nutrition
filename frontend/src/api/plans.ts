@@ -1,6 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "./client";
-import type { CopyDayPayload, Plan, PlanItem, ShoppingList } from "./types";
+import type {
+  AddToPlanPayload,
+  CopyDayPayload,
+  Plan,
+  PlanItem,
+  ShoppingList,
+} from "./types";
 
 export function usePlans() {
   return useQuery({
@@ -34,15 +40,16 @@ export function useDeletePlan() {
   });
 }
 
+// useAddItem adds a recipe (recipe_id + servings) or a raw product
+// (product_id + grams) into a plan cell — same endpoint, two payload shapes.
 export function useAddItem(planId: number) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (input: {
-      day_date: string;
-      meal_slot: string;
-      recipe_id: number;
-      servings: number;
-    }) => api.post<PlanItem>(`/api/meal-plans/${planId}/items`, input),
+    mutationFn: (
+      input:
+        | { day_date: string; meal_slot: string; recipe_id: number; servings: number }
+        | { day_date: string; meal_slot: string; product_id: number; grams: number },
+    ) => api.post<PlanItem>(`/api/meal-plans/${planId}/items`, input),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["plan", planId] });
       qc.invalidateQueries({ queryKey: ["shopping", planId] });
@@ -76,6 +83,25 @@ export function useApplyCopyDay() {
       qc.invalidateQueries({ queryKey: ["plan", payload.plan_id] });
       qc.invalidateQueries({ queryKey: ["shopping", payload.plan_id] });
       qc.invalidateQueries({ queryKey: ["plans"] });
+    },
+  });
+}
+
+// useApplyAddToPlan applies a chat add_to_plan proposal, where the plan id
+// travels in the payload rather than being fixed by the calling screen.
+export function useApplyAddToPlan() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: AddToPlanPayload) =>
+      api.post<PlanItem>(`/api/meal-plans/${payload.plan_id}/items`, {
+        day_date: payload.day_date,
+        meal_slot: payload.meal_slot,
+        product_id: payload.product_id,
+        grams: payload.grams,
+      }),
+    onSuccess: (_data, payload) => {
+      qc.invalidateQueries({ queryKey: ["plan", payload.plan_id] });
+      qc.invalidateQueries({ queryKey: ["shopping", payload.plan_id] });
     },
   });
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/alehturbal/nutrition/backend/internal/assistant"
 	"github.com/alehturbal/nutrition/backend/internal/auth"
@@ -122,6 +123,33 @@ func (h *Handlers) createThread(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, t)
 }
 
+func (h *Handlers) renameThread(w http.ResponseWriter, r *http.Request) {
+	userID, _ := auth.UserIDFromContext(r.Context())
+	id, ok := pathIDParam(w, r, "id")
+	if !ok {
+		return
+	}
+	var req chatThreadRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	title := strings.TrimSpace(req.Title)
+	if title == "" {
+		writeError(w, http.StatusBadRequest, "title is required")
+		return
+	}
+	t, err := h.Chat.UpdateThread(r.Context(), userID, id, title)
+	if errors.Is(err, chat.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "thread not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not rename thread")
+		return
+	}
+	writeJSON(w, http.StatusOK, t)
+}
+
 func (h *Handlers) deleteThread(w http.ResponseWriter, r *http.Request) {
 	userID, _ := auth.UserIDFromContext(r.Context())
 	id, ok := pathIDParam(w, r, "id")
@@ -183,7 +211,8 @@ func (h *Handlers) postMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if _, err := h.Chat.GetThread(r.Context(), userID, id); errors.Is(err, chat.ErrNotFound) {
+	thread, err := h.Chat.GetThread(r.Context(), userID, id)
+	if errors.Is(err, chat.ErrNotFound) {
 		writeError(w, http.StatusNotFound, "thread not found")
 		return
 	} else if err != nil {
@@ -221,6 +250,13 @@ func (h *Handlers) postMessage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "could not save message")
 		return
 	}
+
+	// Default a fresh thread's name to the user's first request. Best-effort:
+	// the title is cosmetic and must not fail the reply. Only when the title is
+	// still empty, so a manual rename is preserved.
+	if len(prior) == 0 && strings.TrimSpace(thread.Title) == "" {
+		_, _ = h.Chat.UpdateThread(r.Context(), userID, id, titleFromMessage(req.Content))
+	}
 	saved, err := h.Chat.AddMessage(r.Context(), id, "assistant", text)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "could not save reply")
@@ -234,4 +270,22 @@ func (h *Handlers) postMessage(w http.ResponseWriter, r *http.Request) {
 		"message":   saved,
 		"proposals": proposals,
 	})
+}
+
+// titleFromMessage derives a thread title from the user's first message: it
+// collapses whitespace and truncates to a readable length on a word boundary,
+// appending an ellipsis when the message was cut.
+func titleFromMessage(content string) string {
+	const maxRunes = 48
+	title := strings.Join(strings.Fields(content), " ")
+	runes := []rune(title)
+	if len(runes) <= maxRunes {
+		return title
+	}
+	cut := string(runes[:maxRunes])
+	// Trim back to the last space so we don't slice a word in half.
+	if i := strings.LastIndex(cut, " "); i > 0 {
+		cut = cut[:i]
+	}
+	return strings.TrimSpace(cut) + "…"
 }

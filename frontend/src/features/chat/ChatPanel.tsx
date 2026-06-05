@@ -5,9 +5,10 @@ import {
   useCreateThread,
   useDeleteThread,
   useSendMessage,
+  useUpdateThread,
 } from "../../api/chat";
-import { useApplyCopyDay } from "../../api/plans";
-import { useCreateProduct } from "../../api/products";
+import { useApplyAddToPlan, useApplyCopyDay } from "../../api/plans";
+import { useCreateProduct, useUpdateProduct } from "../../api/products";
 import { useCreateRecipe } from "../../api/recipes";
 import type { ChatProposal } from "../../api/types";
 import { Button } from "../../components/ui";
@@ -24,7 +25,10 @@ export default function ChatPanel() {
   const threads = useChatThreads();
   const createThread = useCreateThread();
   const deleteThread = useDeleteThread();
+  const updateThread = useUpdateThread();
   const [activeId, setActiveId] = useState<number | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
 
   // Default to the newest thread once threads load.
   useEffect(() => {
@@ -36,8 +40,10 @@ export default function ChatPanel() {
   const messages = useChatMessages(activeId);
   const send = useSendMessage(activeId ?? 0);
   const createProduct = useCreateProduct();
+  const updateProduct = useUpdateProduct();
   const createRecipe = useCreateRecipe();
   const copyDay = useApplyCopyDay();
+  const addToPlan = useApplyAddToPlan();
 
   const [input, setInput] = useState("");
   const [proposals, setProposals] = useState<PendingProposal[]>([]);
@@ -51,12 +57,33 @@ export default function ChatPanel() {
   // active thread changes so they don't leak into another conversation.
   useEffect(() => {
     setProposals([]);
+    setEditing(false);
   }, [activeId]);
 
+  // Leave the title empty so it gets named after the user's first request
+  // (the dropdown shows "Чат #N" until then).
   async function startThread() {
-    const t = await createThread.mutateAsync("Новый чат");
+    const t = await createThread.mutateAsync("");
     setActiveId(t.id);
     setProposals([]);
+  }
+
+  const activeThread = threads.data?.find((t) => t.id === activeId);
+
+  function startRename() {
+    if (activeThread == null) return;
+    setDraft(activeThread.title);
+    setEditing(true);
+  }
+
+  async function commitRename() {
+    const title = draft.trim();
+    if (activeId == null || title === "") {
+      setEditing(false);
+      return;
+    }
+    await updateThread.mutateAsync({ id: activeId, title });
+    setEditing(false);
   }
 
   async function removeThread(id: number) {
@@ -93,11 +120,21 @@ export default function ChatPanel() {
   async function applyProposal(p: PendingProposal) {
     try {
       if (p.proposal.type === "product") {
-        await createProduct.mutateAsync(p.proposal.payload);
+        // A product_id means "update this existing product" — PUT it instead of
+        // POSTing a duplicate. Strip the id from the body: the update endpoint
+        // takes it from the URL and rejects unknown fields.
+        const { product_id, ...input } = p.proposal.payload;
+        if (product_id != null) {
+          await updateProduct.mutateAsync({ id: product_id, input });
+        } else {
+          await createProduct.mutateAsync(input);
+        }
       } else if (p.proposal.type === "recipe") {
         await createRecipe.mutateAsync(p.proposal.payload);
-      } else {
+      } else if (p.proposal.type === "copy_day") {
         await copyDay.mutateAsync(p.proposal.payload);
+      } else {
+        await addToPlan.mutateAsync(p.proposal.payload);
       }
       setProposals((ps) =>
         ps.map((x) => (x.key === p.key ? { ...x, applied: true } : x)),
@@ -126,30 +163,81 @@ export default function ChatPanel() {
     <div className="flex min-h-0 flex-1 flex-col">
       {/* Thread selector */}
       <div className="flex items-center gap-1 border-b border-slate-100 px-3 py-2">
-        <select
-          value={activeId ?? ""}
-          onChange={(e) =>
-            setActiveId(e.target.value ? Number(e.target.value) : null)
-          }
-          className="min-w-0 flex-1 rounded-md border border-slate-300 bg-white px-2 py-1 text-xs outline-none focus:border-brand-500"
-        >
-          {(!threads.data || threads.data.length === 0) && (
-            <option value="">Нет чатов</option>
-          )}
-          {threads.data?.map((t) => (
-            <option key={t.id} value={t.id}>
-              {t.title || `Чат #${t.id}`}
-            </option>
-          ))}
-        </select>
-        <button
-          onClick={startThread}
-          title="Новый чат"
-          className="rounded-md px-2 py-1 text-slate-500 hover:bg-slate-100"
-        >
-          ＋
-        </button>
-        {activeId != null && (
+        {editing ? (
+          <input
+            autoFocus
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                commitRename();
+              } else if (e.key === "Escape") {
+                e.preventDefault();
+                setEditing(false);
+              }
+            }}
+            disabled={updateThread.isPending}
+            className="min-w-0 flex-1 rounded-md border border-slate-300 bg-white px-2 py-1 text-xs outline-none focus:border-brand-500 disabled:bg-slate-50"
+          />
+        ) : (
+          <select
+            value={activeId ?? ""}
+            onChange={(e) =>
+              setActiveId(e.target.value ? Number(e.target.value) : null)
+            }
+            className="min-w-0 flex-1 rounded-md border border-slate-300 bg-white px-2 py-1 text-xs outline-none focus:border-brand-500"
+          >
+            {(!threads.data || threads.data.length === 0) && (
+              <option value="">Нет чатов</option>
+            )}
+            {threads.data?.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.title || `Чат #${t.id}`}
+              </option>
+            ))}
+          </select>
+        )}
+        {editing ? (
+          <>
+            <button
+              onClick={commitRename}
+              disabled={updateThread.isPending || draft.trim() === ""}
+              title="Сохранить"
+              className="rounded-md px-2 py-1 text-green-600 hover:bg-green-50 disabled:text-slate-300 disabled:hover:bg-transparent"
+            >
+              ✓
+            </button>
+            <button
+              onClick={() => setEditing(false)}
+              disabled={updateThread.isPending}
+              title="Отмена"
+              className="rounded-md px-2 py-1 text-slate-400 hover:bg-slate-100"
+            >
+              ✕
+            </button>
+          </>
+        ) : (
+          <>
+            {activeId != null && (
+              <button
+                onClick={startRename}
+                title="Переименовать чат"
+                className="rounded-md px-2 py-1 text-slate-500 hover:bg-slate-100"
+              >
+                ✎
+              </button>
+            )}
+            <button
+              onClick={startThread}
+              title="Новый чат"
+              className="rounded-md px-2 py-1 text-slate-500 hover:bg-slate-100"
+            >
+              ＋
+            </button>
+          </>
+        )}
+        {activeId != null && !editing && (
           <button
             onClick={() => removeThread(activeId)}
             title="Удалить чат"
@@ -256,14 +344,20 @@ function ProposalCard({
   const { proposal, applied, error } = pending;
   const label =
     proposal.type === "product"
-      ? "Продукт"
+      ? proposal.payload.product_id != null
+        ? "Продукт · обновление"
+        : "Продукт"
       : proposal.type === "recipe"
         ? "Рецепт"
-        : "Копирование дня";
+        : proposal.type === "copy_day"
+          ? "Копирование дня"
+          : "Добавить в план";
   const title =
     proposal.type === "copy_day"
       ? `${proposal.payload.source_date} → ${proposal.payload.target_dates.length} дн.`
-      : proposal.payload.name || "—";
+      : proposal.type === "add_to_plan"
+        ? `${proposal.payload.day_date} · ${proposal.payload.meal_slot} · ${proposal.payload.grams} г`
+        : proposal.payload.name || "—";
 
   return (
     <div className="mr-6 rounded-lg border border-brand-200 bg-white px-3 py-2 text-sm">

@@ -18,6 +18,9 @@ var (
 	// ErrInvalidRecipe is returned when an item references a recipe the user
 	// does not own.
 	ErrInvalidRecipe = errors.New("item references unknown recipe")
+	// ErrInvalidProduct is returned when an item references a product the user
+	// does not own.
+	ErrInvalidProduct = errors.New("item references unknown product")
 )
 
 // dateLayout is the wire format for DATE values (YYYY-MM-DD).
@@ -56,15 +59,20 @@ type Plan struct {
 	Items     []Item    `json:"items"`
 }
 
-// Item places a recipe into one day × meal-slot cell of a plan.
+// Item places a recipe or a raw product into one day × meal-slot cell of a plan.
+// Exactly one side is set: a recipe (RecipeID/RecipeName/Servings) or a product
+// (ProductID/ProductName/Grams).
 type Item struct {
-	ID         int64   `json:"id"`
-	MealPlanID int64   `json:"meal_plan_id"`
-	DayDate    Date    `json:"day_date"`
-	MealSlot   string  `json:"meal_slot"`
-	RecipeID   int64   `json:"recipe_id"`
-	RecipeName string  `json:"recipe_name"`
-	Servings   float64 `json:"servings"`
+	ID          int64    `json:"id"`
+	MealPlanID  int64    `json:"meal_plan_id"`
+	DayDate     Date     `json:"day_date"`
+	MealSlot    string   `json:"meal_slot"`
+	RecipeID    int64    `json:"recipe_id"`
+	RecipeName  string   `json:"recipe_name"`
+	Servings    float64  `json:"servings"`
+	ProductID   *int64   `json:"product_id,omitempty"`
+	ProductName string   `json:"product_name,omitempty"`
+	Grams       *float64 `json:"grams,omitempty"`
 }
 
 // Store is a PostgreSQL-backed meal-plan repository.
@@ -107,8 +115,12 @@ func (s *Store) GetPlan(ctx context.Context, userID, id int64) (Plan, error) {
 	}
 
 	rows, err := s.pool.Query(ctx,
-		`SELECT mpi.id, mpi.meal_plan_id, mpi.day_date, mpi.meal_slot, mpi.recipe_id, r.name, mpi.servings
-		 FROM meal_plan_items mpi JOIN recipes r ON r.id = mpi.recipe_id
+		`SELECT mpi.id, mpi.meal_plan_id, mpi.day_date, mpi.meal_slot,
+		        mpi.recipe_id, r.name, mpi.servings,
+		        mpi.product_id, p.name, mpi.grams
+		 FROM meal_plan_items mpi
+		 LEFT JOIN recipes  r ON r.id = mpi.recipe_id
+		 LEFT JOIN products p ON p.id = mpi.product_id
 		 WHERE mpi.meal_plan_id = $1
 		 ORDER BY mpi.day_date, mpi.meal_slot, mpi.id`, id)
 	if err != nil {
@@ -118,9 +130,21 @@ func (s *Store) GetPlan(ctx context.Context, userID, id int64) (Plan, error) {
 	p.Items = []Item{}
 	for rows.Next() {
 		var it Item
+		var recipeID *int64
+		var recipeName, productName *string
 		if err := rows.Scan(&it.ID, &it.MealPlanID, &it.DayDate.Time, &it.MealSlot,
-			&it.RecipeID, &it.RecipeName, &it.Servings); err != nil {
+			&recipeID, &recipeName, &it.Servings,
+			&it.ProductID, &productName, &it.Grams); err != nil {
 			return Plan{}, fmt.Errorf("scan item: %w", err)
+		}
+		if recipeID != nil {
+			it.RecipeID = *recipeID
+		}
+		if recipeName != nil {
+			it.RecipeName = *recipeName
+		}
+		if productName != nil {
+			it.ProductName = *productName
 		}
 		p.Items = append(p.Items, it)
 	}
@@ -159,10 +183,12 @@ func (s *Store) DeletePlan(ctx context.Context, userID, id int64) error {
 	return nil
 }
 
-// AddItem places a recipe into a plan cell. The plan and recipe must belong to
-// the user (ErrNotFound / ErrInvalidRecipe otherwise).
+// AddItem places a recipe or a raw product into a plan cell. The plan and the
+// referenced recipe/product must belong to the user (ErrNotFound /
+// ErrInvalidRecipe / ErrInvalidProduct otherwise).
 func (s *Store) AddItem(ctx context.Context, userID int64, it Item) (Item, error) {
-	if it.Servings <= 0 {
+	isProduct := it.ProductID != nil
+	if !isProduct && it.Servings <= 0 {
 		it.Servings = 1
 	}
 
@@ -182,28 +208,50 @@ func (s *Store) AddItem(ctx context.Context, userID int64, it Item) (Item, error
 		return Item{}, ErrNotFound
 	}
 
-	var recipeOK bool
-	if err := tx.QueryRow(ctx,
-		`SELECT EXISTS(SELECT 1 FROM recipes WHERE id = $1 AND user_id = $2)`,
-		it.RecipeID, userID).Scan(&recipeOK); err != nil {
-		return Item{}, fmt.Errorf("verify recipe: %w", err)
-	}
-	if !recipeOK {
-		return Item{}, ErrInvalidRecipe
+	if isProduct {
+		var productOK bool
+		if err := tx.QueryRow(ctx,
+			`SELECT EXISTS(SELECT 1 FROM products WHERE id = $1 AND user_id = $2)`,
+			*it.ProductID, userID).Scan(&productOK); err != nil {
+			return Item{}, fmt.Errorf("verify product: %w", err)
+		}
+		if !productOK {
+			return Item{}, ErrInvalidProduct
+		}
+		err = tx.QueryRow(ctx,
+			`INSERT INTO meal_plan_items (meal_plan_id, day_date, meal_slot, product_id, grams)
+			 VALUES ($1,$2,$3,$4,$5) RETURNING id`,
+			it.MealPlanID, it.DayDate.Time, it.MealSlot, *it.ProductID, it.Grams,
+		).Scan(&it.ID)
+		if err != nil {
+			return Item{}, fmt.Errorf("insert product item: %w", err)
+		}
+		if err := tx.QueryRow(ctx, `SELECT name FROM products WHERE id = $1`, *it.ProductID).Scan(&it.ProductName); err != nil {
+			return Item{}, fmt.Errorf("load product name: %w", err)
+		}
+	} else {
+		var recipeOK bool
+		if err := tx.QueryRow(ctx,
+			`SELECT EXISTS(SELECT 1 FROM recipes WHERE id = $1 AND user_id = $2)`,
+			it.RecipeID, userID).Scan(&recipeOK); err != nil {
+			return Item{}, fmt.Errorf("verify recipe: %w", err)
+		}
+		if !recipeOK {
+			return Item{}, ErrInvalidRecipe
+		}
+		err = tx.QueryRow(ctx,
+			`INSERT INTO meal_plan_items (meal_plan_id, day_date, meal_slot, recipe_id, servings)
+			 VALUES ($1,$2,$3,$4,$5) RETURNING id`,
+			it.MealPlanID, it.DayDate.Time, it.MealSlot, it.RecipeID, it.Servings,
+		).Scan(&it.ID)
+		if err != nil {
+			return Item{}, fmt.Errorf("insert item: %w", err)
+		}
+		if err := tx.QueryRow(ctx, `SELECT name FROM recipes WHERE id = $1`, it.RecipeID).Scan(&it.RecipeName); err != nil {
+			return Item{}, fmt.Errorf("load recipe name: %w", err)
+		}
 	}
 
-	err = tx.QueryRow(ctx,
-		`INSERT INTO meal_plan_items (meal_plan_id, day_date, meal_slot, recipe_id, servings)
-		 VALUES ($1,$2,$3,$4,$5) RETURNING id`,
-		it.MealPlanID, it.DayDate.Time, it.MealSlot, it.RecipeID, it.Servings,
-	).Scan(&it.ID)
-	if err != nil {
-		return Item{}, fmt.Errorf("insert item: %w", err)
-	}
-
-	if err := tx.QueryRow(ctx, `SELECT name FROM recipes WHERE id = $1`, it.RecipeID).Scan(&it.RecipeName); err != nil {
-		return Item{}, fmt.Errorf("load recipe name: %w", err)
-	}
 	if err := tx.Commit(ctx); err != nil {
 		return Item{}, err
 	}
@@ -230,25 +278,32 @@ func (s *Store) CopyDay(ctx context.Context, userID, planID int64, source Date, 
 		return nil, ErrNotFound
 	}
 
-	// Load the source day's items.
+	// Load the source day's items (recipe or product).
 	rows, err := tx.Query(ctx,
-		`SELECT mpi.meal_slot, mpi.recipe_id, r.name, mpi.servings
-		 FROM meal_plan_items mpi JOIN recipes r ON r.id = mpi.recipe_id
+		`SELECT mpi.meal_slot, mpi.recipe_id, r.name, mpi.servings,
+		        mpi.product_id, p.name, mpi.grams
+		 FROM meal_plan_items mpi
+		 LEFT JOIN recipes  r ON r.id = mpi.recipe_id
+		 LEFT JOIN products p ON p.id = mpi.product_id
 		 WHERE mpi.meal_plan_id = $1 AND mpi.day_date = $2
 		 ORDER BY mpi.meal_slot, mpi.id`, planID, source.Time)
 	if err != nil {
 		return nil, fmt.Errorf("load source items: %w", err)
 	}
 	type srcItem struct {
-		slot       string
-		recipeID   int64
-		recipeName string
-		servings   float64
+		slot        string
+		recipeID    *int64
+		recipeName  *string
+		servings    float64
+		productID   *int64
+		productName *string
+		grams       *float64
 	}
 	var src []srcItem
 	for rows.Next() {
 		var it srcItem
-		if err := rows.Scan(&it.slot, &it.recipeID, &it.recipeName, &it.servings); err != nil {
+		if err := rows.Scan(&it.slot, &it.recipeID, &it.recipeName, &it.servings,
+			&it.productID, &it.productName, &it.grams); err != nil {
 			rows.Close()
 			return nil, fmt.Errorf("scan source item: %w", err)
 		}
@@ -272,22 +327,38 @@ func (s *Store) CopyDay(ctx context.Context, userID, planID int64, source Date, 
 		}
 		for _, it := range src {
 			var newID int64
-			if err := tx.QueryRow(ctx,
-				`INSERT INTO meal_plan_items (meal_plan_id, day_date, meal_slot, recipe_id, servings)
-				 VALUES ($1,$2,$3,$4,$5) RETURNING id`,
-				planID, target.Time, it.slot, it.recipeID, it.servings,
-			).Scan(&newID); err != nil {
-				return nil, fmt.Errorf("insert copied item: %w", err)
+			copied := Item{MealPlanID: planID, DayDate: target, MealSlot: it.slot}
+			if it.productID != nil {
+				if err := tx.QueryRow(ctx,
+					`INSERT INTO meal_plan_items (meal_plan_id, day_date, meal_slot, product_id, grams)
+					 VALUES ($1,$2,$3,$4,$5) RETURNING id`,
+					planID, target.Time, it.slot, *it.productID, it.grams,
+				).Scan(&newID); err != nil {
+					return nil, fmt.Errorf("insert copied item: %w", err)
+				}
+				copied.ProductID = it.productID
+				copied.Grams = it.grams
+				if it.productName != nil {
+					copied.ProductName = *it.productName
+				}
+			} else {
+				if err := tx.QueryRow(ctx,
+					`INSERT INTO meal_plan_items (meal_plan_id, day_date, meal_slot, recipe_id, servings)
+					 VALUES ($1,$2,$3,$4,$5) RETURNING id`,
+					planID, target.Time, it.slot, *it.recipeID, it.servings,
+				).Scan(&newID); err != nil {
+					return nil, fmt.Errorf("insert copied item: %w", err)
+				}
+				if it.recipeID != nil {
+					copied.RecipeID = *it.recipeID
+				}
+				if it.recipeName != nil {
+					copied.RecipeName = *it.recipeName
+				}
+				copied.Servings = it.servings
 			}
-			out = append(out, Item{
-				ID:         newID,
-				MealPlanID: planID,
-				DayDate:    target,
-				MealSlot:   it.slot,
-				RecipeID:   it.recipeID,
-				RecipeName: it.recipeName,
-				Servings:   it.servings,
-			})
+			copied.ID = newID
+			out = append(out, copied)
 		}
 	}
 
